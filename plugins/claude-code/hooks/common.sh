@@ -36,9 +36,16 @@ else
   _PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
 fi
 # When MEMSEARCH_DIR is explicitly set, use global scope (shared dir + collection).
-# Otherwise, default to per-project isolation.
+# Otherwise memory lives in a central per-project store keyed by the collection
+# name, which keeps checkouts clean and lets worktrees of one repo share a journal.
 _MEMSEARCH_DIR_EXPLICIT="${MEMSEARCH_DIR:+true}"
-MEMSEARCH_DIR="${MEMSEARCH_DIR:-$_PROJECT_DIR/.memsearch}"
+_DERIVE_COLLECTION="$(dirname "${BASH_SOURCE[0]}")/../scripts/derive-collection.sh"
+if [ "$_MEMSEARCH_DIR_EXPLICIT" = "true" ]; then
+  COLLECTION_NAME=$("$_DERIVE_COLLECTION" "$MEMSEARCH_DIR" 2>/dev/null || true)
+else
+  COLLECTION_NAME=$("$_DERIVE_COLLECTION" "$_PROJECT_DIR" 2>/dev/null || true)
+  MEMSEARCH_DIR="$HOME/.memsearch/projects/${COLLECTION_NAME:-default}"
+fi
 MEMORY_DIR="$MEMSEARCH_DIR/memory"
 
 # Find memsearch binary: prefer PATH, fallback to uvx
@@ -54,14 +61,6 @@ _detect_memsearch
 
 # Short command prefix for injected instructions (falls back to "memsearch" even if unavailable)
 MEMSEARCH_CMD_PREFIX="${MEMSEARCH_CMD:-memsearch}"
-
-# Derive collection name: from MEMSEARCH_DIR when explicitly set (global scope),
-# otherwise from project directory (per-project isolation).
-if [ "$_MEMSEARCH_DIR_EXPLICIT" = "true" ]; then
-  COLLECTION_NAME=$("$(dirname "${BASH_SOURCE[0]}")/../scripts/derive-collection.sh" "$MEMSEARCH_DIR" 2>/dev/null || true)
-else
-  COLLECTION_NAME=$("$(dirname "${BASH_SOURCE[0]}")/../scripts/derive-collection.sh" "$_PROJECT_DIR" 2>/dev/null || true)
-fi
 
 # --- JSON helpers (jq preferred, python3 fallback) ---
 

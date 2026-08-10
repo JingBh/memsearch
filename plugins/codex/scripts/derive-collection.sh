@@ -12,11 +12,21 @@ set -euo pipefail
 
 PROJECT_DIR="${1:-$(pwd)}"
 
+# Linked worktrees share the main worktree's identity so that memory follows the
+# repository rather than the checkout.  Submodules keep their own identity: for
+# them git-dir and git-common-dir are the same path, so the branch below is skipped.
+# This runs before path resolution so that both forms normalize identically.
+_git_dir=$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-dir 2>/dev/null || true)
+_git_common=$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+if [ -n "$_git_dir" ] && [ "$_git_dir" != "$_git_common" ]; then
+  PROJECT_DIR=$(git -C "$PROJECT_DIR" worktree list --porcelain | sed -n '1s/^worktree //p')
+fi
+
 # Resolve to absolute path (realpath preferred, cd fallback, raw last resort)
 if realpath -m "$PROJECT_DIR" &>/dev/null 2>&1; then
   PROJECT_DIR="$(realpath -m "$PROJECT_DIR")"
 elif [ -d "$PROJECT_DIR" ]; then
-  PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+  PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd -P)"
 else
   # If directory doesn't exist and no realpath, ensure it starts with /
   case "$PROJECT_DIR" in
