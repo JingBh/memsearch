@@ -13,6 +13,7 @@ from memsearch.maintenance import (
     MAX_PROMPT_CHARS,
     TaskContext,
     _build_prompt,
+    _parse_task_response,
     _read_recent_journals,
     run_due_tasks,
     run_memory_command,
@@ -152,6 +153,166 @@ def test_newest_entries_within_oversized_journal_survive(
     assert "EARLIEST_ENTRY_MARKER" not in journals
     assert "[older journal entries truncated]" in journals
     assert len(journals) <= budget
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"action":"none","reason":"ok"}',
+        '```json\n{"action":"none","reason":"ok"}\n```',
+    ],
+)
+def test_parse_task_response_preserves_supported_json_formats(raw: str) -> None:
+    assert _parse_task_response(raw) == {
+        "action": "none",
+        "reason": "ok",
+    }
+
+
+def test_parse_task_response_accepts_reasoning_before_json() -> None:
+    raw = """\
+## Reasoning
+The recent journals do not add durable project state.
+
+## Result
+{"action":"none","reason":"No durable change."}
+"""
+
+    assert _parse_task_response(raw) == {
+        "action": "none",
+        "reason": "No durable change.",
+    }
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        '"',
+        "\n\nDone.",
+    ],
+)
+def test_parse_task_response_accepts_trailing_text_after_json(
+    suffix: str,
+) -> None:
+    raw = '{"action":"none","reason":"ok"}' + suffix
+
+    assert _parse_task_response(raw) == {
+        "action": "none",
+        "reason": "ok",
+    }
+
+
+def test_parse_task_response_skips_invalid_braces_before_result() -> None:
+    raw = """\
+Reasoning mentioned {not valid JSON}.
+
+{"action":"none","reason":"ok"}
+"""
+
+    assert _parse_task_response(raw) == {
+        "action": "none",
+        "reason": "ok",
+    }
+
+
+def test_parse_task_response_prefers_final_maintenance_object() -> None:
+    raw = """\
+The expected no-op shape is {"action":"none","reason":"example"}.
+
+## Result
+{"action":"replace","reason":"durable update","content":"# Project Memory"}
+"""
+
+    assert _parse_task_response(raw) == {
+        "action": "replace",
+        "reason": "durable update",
+        "content": "# Project Memory",
+    }
+
+
+def test_parse_task_response_preserves_outer_action_with_nested_object() -> None:
+    raw = (
+        json.dumps(
+            {
+                "action": "replace",
+                "reason": "durable update",
+                "content": "# Project Memory",
+                "meta": {"action": "none"},
+            }
+        )
+        + "\n\nDone."
+    )
+
+    parsed = _parse_task_response(raw)
+
+    assert parsed["action"] == "replace"
+
+
+def test_parse_task_response_rejects_truncated_outer_with_nested_action() -> None:
+    raw = '## Result\n{"action":"replace","meta":{"action":"none"},"content":"# Project Memory'
+
+    with pytest.raises(
+        RuntimeError,
+        match="did not return valid JSON",
+    ):
+        _parse_task_response(raw)
+
+
+def test_parse_task_response_preserves_braces_inside_content() -> None:
+    raw = (
+        json.dumps(
+            {
+                "action": "replace",
+                "reason": "durable update",
+                "content": "# Project Memory\n\nUse {braces} safely.",
+            }
+        )
+        + "\n\nDone."
+    )
+
+    parsed = _parse_task_response(raw)
+
+    assert parsed["content"] == "# Project Memory\n\nUse {braces} safely."
+
+
+def test_parse_task_response_rejects_truncated_json() -> None:
+    raw = '## Result\n{"action":"replace","content":"# Project Memory'
+
+    with pytest.raises(
+        RuntimeError,
+        match="did not return valid JSON",
+    ):
+        _parse_task_response(raw)
+
+
+def test_parse_task_response_rejects_invalid_action() -> None:
+    raw = '{"action":"append","reason":"unsupported"}'
+
+    with pytest.raises(
+        RuntimeError,
+        match="action must be 'none' or 'replace'",
+    ):
+        _parse_task_response(raw)
+
+
+def test_parse_task_response_rejects_nested_action_inside_non_dict() -> None:
+    raw = '[{"action":"none"}] trailing prose'
+
+    with pytest.raises(
+        RuntimeError,
+        match="did not return valid JSON",
+    ):
+        _parse_task_response(raw)
+
+
+def test_parse_task_response_rejects_truncated_non_dict_with_nested_action() -> None:
+    raw = '[{"action":"none"}'
+
+    with pytest.raises(
+        RuntimeError,
+        match="did not return valid JSON",
+    ):
+        _parse_task_response(raw)
 
 
 def test_openai_maintenance_uses_default_temperature(tmp_path: Path, monkeypatch) -> None:
