@@ -136,7 +136,7 @@ Step by step:
 
     Raw tool calls, tool outputs, and transient failure details are omitted from summarization input. The assistant's textual response can still mention important files, searches, refactors, findings, and tests, and the summarizer can record those naturally.
 
-4. **Haiku summarization** -- the extracted turn is piped to `claude -p --model haiku` with a system prompt instructing it to write 2-10 third-person bullet points in the same language as the user's message. Set `plugins.claude-code.summarize.model` to override only this native capture model. To use a memsearch-managed API provider instead, define `[llm.providers.<name>]` and set `plugins.claude-code.summarize.provider` to that name. Empty or `native` keeps the Haiku default. The third-person framing ("User asked about...", "Agent implemented...") makes the summaries more useful as memory entries than first-person notes.
+4. **Haiku summarization** -- a prompt containing the summary instructions and extracted turn is piped to `claude -p --model haiku`. Set `plugins.claude-code.summarize.model` to override only this native capture model. To use a memsearch-managed API provider instead, define `[llm.providers.<name>]` and set `plugins.claude-code.summarize.provider` to that name. Empty or `native` keeps the Haiku default. The third-person framing ("User asked about...", "Agent implemented...") makes the summaries more useful as memory entries than first-person notes. If the summarizer cannot start, times out, exits unsuccessfully, or returns no text, the hook stores only a short diagnostic marker and retains the transcript anchor for progressive disclosure.
 
 5. **Append with anchors** -- on the first content-bearing Stop for a session, the hook creates the daily file if needed and writes `## Session HH:MM`. Each captured turn is written under a `### HH:MM` heading with an HTML comment anchor. Later Stops in the same session reuse its heading:
     ```markdown
@@ -239,7 +239,7 @@ plugins/claude-code/
 │   ├── session-start.sh         # Start watch + inject cold-start context
 │   ├── user-prompt-submit.sh    # Lightweight systemMessage hint
 │   ├── stop.sh                  # Parse transcript -> summarize -> lazily create heading -> append
-│   ├── parse-transcript.sh      # Deterministic JSONL-to-text parser with truncation
+│   ├── parse-transcript.sh      # Deterministic JSONL-to-text parser
 │   └── session-end.sh           # Stop watch process (cleanup)
 ├── scripts/
 │   └── derive-collection.sh     # Derive per-project collection name from project path

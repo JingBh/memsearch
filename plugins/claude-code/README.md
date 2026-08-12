@@ -181,7 +181,7 @@ Fires after Claude finishes each response. Runs **asynchronously** so it does no
 1. **Guards against recursion.** Checks `stop_hook_active` to prevent infinite loops (since the hook itself calls `claude -p`).
 2. **Validates the transcript.** Skips if the transcript file is missing or has fewer than 3 lines.
 3. **Extracts the last turn.** Calls `parse-transcript.sh` (Python3 inline, no `jq` dependency), which finds the last real user message and extracts User/Assistant text from there to EOF. Skips progress, `file-history-snapshot`, system, thinking blocks, raw tool calls, and raw tool results. Formats output with clear role labels (`[User]`, `[Claude Code]`) so the summarizer works from a clean third-party transcript while still allowing the assistant's text to mention important files, searches, findings, and tests.
-4. **Summarizes with Haiku.** Pipes the parsed turn to `CLAUDECODE= claude -p --model haiku --no-session-persistence` with an external-observer system prompt requesting 2-10 third-person bullet points in the same language as the user's message. To override only this plugin's native summarize model, set `plugins.claude-code.summarize.model`; empty or unset keeps the Haiku default. To use a memsearch-managed API provider instead, define `[llm.providers.<name>]` and set `plugins.claude-code.summarize.provider` to that name.
+4. **Summarizes with Haiku.** Pipes a prompt containing the summary instructions and parsed turn to `CLAUDECODE= claude -p --model haiku --no-session-persistence`. To override only this plugin's native summarize model, set `plugins.claude-code.summarize.model`; empty or unset keeps the Haiku default. To use a memsearch-managed API provider instead, define `[llm.providers.<name>]` and set `plugins.claude-code.summarize.provider` to that name. Summarizer failures write only a short diagnostic marker; the transcript remains available through the progressive-disclosure anchor without copying its content into memory.
 5. **Appends to the daily log.** On the first content-bearing Stop for a session, creates the daily file if needed and writes `## Session HH:MM`. Every captured turn gets a `### HH:MM` sub-heading with an HTML comment anchor containing the session ID, turn UUID, and transcript path. Later Stops in the same session reuse its existing session heading. The hook then runs `memsearch index` for immediate indexing.
 
 #### SessionEnd
@@ -783,7 +783,7 @@ SessionStart does not create a daily file. If no content-bearing Stop has comple
 - `plugins.claude-code.summarize.enabled` is `false`.
 - The Stop hook timed out or failed; inspect the Claude Code debug log for the hook result.
 
-If the `claude` CLI is unavailable or native summarization returns no text, the hook falls back to the parsed turn instead of skipping the journal write.
+If summarization cannot start, times out, exits unsuccessfully, or returns no text, the hook writes a short diagnostic marker instead of the parsed turn. The entry retains its transcript anchor for progressive disclosure.
 
 ---
 

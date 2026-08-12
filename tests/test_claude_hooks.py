@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def _write_executable(path: Path, source: str) -> None:
     path.write_text(source, encoding="utf-8")
@@ -670,6 +672,142 @@ echo "- User discussed a macOS stop hook regression."
     assert captured_args[:4] == ["-p", "--strict-mcp-config", "--tools", ""]
     assert "--safe-mode" not in captured_args
     assert captured_args[captured_args.index("--model") + 1] == "haiku"
+
+
+def test_claude_stop_hook_sends_large_native_prompt_on_stdin(tmp_path: Path) -> None:
+    script = Path("plugins/claude-code/hooks/stop.sh")
+    home = tmp_path / "home"
+    fake_bin = tmp_path / "bin"
+    memsearch_dir = tmp_path / ".memsearch"
+    transcript = tmp_path / "large.jsonl"
+    received = tmp_path / "received.txt"
+    home.mkdir()
+    fake_bin.mkdir()
+    transcript.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "system", "message": {"content": "start"}}),
+                json.dumps({"type": "user", "uuid": "turn-large", "message": {"content": "x" * 200000}}),
+                json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _write_executable(
+        fake_bin / "memsearch",
+        """#!/usr/bin/env bash
+if [ "$1" = "config" ] && [ "$2" = "get" ]; then
+  case "$3" in
+    embedding.provider) echo onnx ;;
+    plugins.claude-code.summarize.enabled) echo true ;;
+    plugins.claude-code.summarize.provider) echo "" ;;
+    plugins.claude-code.summarize.model) echo "" ;;
+    prompts.summarize) echo "" ;;
+  esac
+fi
+if [ "$1" = index ]; then exit 0; fi
+""",
+    )
+    _write_executable(
+        fake_bin / "claude",
+        """#!/usr/bin/env bash
+if [ "${1:-}" = --help ]; then exit 0; fi
+cat > "$CLAUDE_INPUT_FILE"
+echo '- Large turn summarized.'
+""",
+    )
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "CLAUDE_PLUGIN_ROOT": str(Path("plugins/claude-code").resolve()),
+        "CLAUDE_PROJECT_DIR": str(tmp_path),
+        "MEMSEARCH_DIR": str(memsearch_dir),
+        "CLAUDE_INPUT_FILE": str(received),
+    }
+    result = subprocess.run(
+        ["bash", str(script)],
+        input=json.dumps({"transcript_path": str(transcript)}),
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert result.stdout.strip() == "{}"
+    assert len(received.read_text(encoding="utf-8")) > 200000
+    memory_text = next((memsearch_dir / "memory").glob("*.md")).read_text(encoding="utf-8")
+    assert "Large turn summarized." in memory_text
+    assert "x" * 1000 not in memory_text
+
+
+@pytest.mark.parametrize("route", ["native", "provider"])
+@pytest.mark.parametrize("mode", ["missing", "nonzero", "empty", "timeout"])
+def test_claude_stop_hook_failure_never_persists_transcript(tmp_path: Path, route: str, mode: str) -> None:
+    script = Path("plugins/claude-code/hooks/stop.sh")
+    home, fake_bin, memsearch_dir = tmp_path / "home", tmp_path / "bin", tmp_path / ".memsearch"
+    transcript = tmp_path / "session.jsonl"
+    home.mkdir()
+    fake_bin.mkdir()
+    marker = "SECRET-TRANSCRIPT-MARKER"
+    _write_claude_transcript(transcript, turn_uuid="turn-failure")
+    transcript.write_text(
+        transcript.read_text(encoding="utf-8").replace("Summarize this session", marker), encoding="utf-8"
+    )
+    provider = "openai" if route == "provider" else ""
+    provider_mode = mode if route == "provider" else "success"
+    _write_executable(
+        fake_bin / "memsearch",
+        f"""#!/usr/bin/env bash
+if [ "$1" = config ] && [ "$2" = get ]; then
+  case "$3" in
+    embedding.provider) echo onnx ;;
+    plugins.claude-code.summarize.enabled) echo true ;;
+    plugins.claude-code.summarize.provider) echo "{provider}" ;;
+    *) echo "" ;;
+  esac
+fi
+if [ "$1" = index ]; then exit 0; fi
+if [ "$1" = summarize ]; then
+  case "{provider_mode}" in
+    missing) exit 127 ;;
+    nonzero) exit 23 ;;
+    empty) exit 0 ;;
+    timeout) echo should-not-run ;;
+  esac
+fi
+""",
+    )
+    if route == "native" and mode != "missing":
+        body = '#!/usr/bin/env bash\nif [ "${1:-}" = --help ]; then exit 0; fi\n'
+        body += {"nonzero": "exit 23\n", "empty": "exit 0\n", "timeout": "echo should-not-run\n"}[mode]
+        _write_executable(fake_bin / "claude", body)
+    if mode == "timeout":
+        _write_executable(
+            fake_bin / "timeout",
+            '#!/usr/bin/env bash\nif [ "$1" = 110 ]; then exit 124; fi\nshift\nexec "$@"\n',
+        )
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "CLAUDE_PLUGIN_ROOT": str(Path("plugins/claude-code").resolve()),
+        "CLAUDE_PROJECT_DIR": str(tmp_path),
+        "MEMSEARCH_DIR": str(memsearch_dir),
+    }
+    subprocess.run(
+        ["bash", str(script)],
+        input=json.dumps({"transcript_path": str(transcript)}),
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+        timeout=125,
+    )
+    memory_text = next((memsearch_dir / "memory").glob("*.md")).read_text(encoding="utf-8")
+    assert marker not in memory_text
+    assert "transcript content was omitted" in memory_text
+    assert "session:session turn:turn-failure" in memory_text
 
 
 def test_claude_stop_hook_groups_session_headings(tmp_path: Path) -> None:

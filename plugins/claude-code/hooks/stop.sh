@@ -116,16 +116,29 @@ fi
 # summarize model override can replace the model without changing provider
 # routing.
 SUMMARY=""
+SUMMARY_STATUS=0
+SUMMARY_FAILURE=""
 SUMMARIZE_PROVIDER=""
 if [ -n "$MEMSEARCH_CMD" ]; then
   SUMMARIZE_PROVIDER=$($MEMSEARCH_CMD config get plugins.claude-code.summarize.provider 2>/dev/null || true)
 fi
 
+_run_summarizer() {
+  if command -v timeout &>/dev/null; then
+    timeout 110 "$@"
+  else
+    perl -e 'alarm shift; exec @ARGV' 110 "$@"
+  fi
+}
+
 if [ -n "$SUMMARIZE_PROVIDER" ] && [ "$SUMMARIZE_PROVIDER" != "native" ] && [ -n "$MEMSEARCH_CMD" ]; then
-  SUMMARY=$(printf '%s' "$PARSED" | MEMSEARCH_NO_WATCH=1 $MEMSEARCH_CMD summarize \
+  set +e
+  SUMMARY=$(printf '%s' "$PARSED" | MEMSEARCH_NO_WATCH=1 _run_summarizer $MEMSEARCH_CMD summarize \
     --plugin claude-code \
     --agent-name "$AGENT_NAME" \
-    2>/dev/null || true)
+    2>/dev/null)
+  SUMMARY_STATUS=$?
+  set -e
 elif command -v claude &>/dev/null; then
   SUMMARIZE_MODEL="haiku"
   if [ -n "$MEMSEARCH_CMD" ]; then
@@ -134,8 +147,8 @@ elif command -v claude &>/dev/null; then
       SUMMARIZE_MODEL="$CONFIG_MODEL"
     fi
   fi
-  # Keep the shared external-observer prompt, but pass it as the primary prompt.
-  # This avoids the stdin + --system-prompt path while preserving summary rules.
+  # Keep the shared external-observer prompt as the primary prompt, but deliver
+  # it over stdin so transcript size never contributes to argv limits.
   LLM_PROMPT="${SYSTEM_PROMPT}
 
 Transcript:
@@ -144,20 +157,32 @@ ${PARSED}"
   if claude --help 2>/dev/null | grep -q -- '--safe-mode'; then
     CLAUDE_SAFE_MODE_ARG="--safe-mode"
   fi
-  SUMMARY=$(MEMSEARCH_NO_WATCH=1 MEMSEARCH_DISABLE=1 CLAUDECODE= claude -p \
+  set +e
+  SUMMARY=$(printf '%s' "$LLM_PROMPT" | MEMSEARCH_NO_WATCH=1 MEMSEARCH_DISABLE=1 CLAUDECODE= _run_summarizer claude -p \
     ${CLAUDE_SAFE_MODE_ARG:+"$CLAUDE_SAFE_MODE_ARG"} \
     --strict-mcp-config \
     --tools "" \
     --model "$SUMMARIZE_MODEL" \
     --no-session-persistence \
     --no-chrome \
-    "$LLM_PROMPT" \
-    2>/dev/null || true)
+    2>/dev/null)
+  SUMMARY_STATUS=$?
+  set -e
+else
+  SUMMARY_FAILURE="summarizer unavailable"
 fi
 
-# If claude is not available or returned empty, fall back to raw parsed output
-if [ -z "$SUMMARY" ]; then
-  SUMMARY="$PARSED"
+if [ -z "$SUMMARY_FAILURE" ] && [ "$SUMMARY_STATUS" -ne 0 ]; then
+  if [ "$SUMMARY_STATUS" -eq 124 ] || [ "$SUMMARY_STATUS" -eq 142 ]; then
+    SUMMARY_FAILURE="summarizer timed out"
+  else
+    SUMMARY_FAILURE="summarizer exited with status $SUMMARY_STATUS"
+  fi
+elif [ -z "$SUMMARY_FAILURE" ] && [ -z "$SUMMARY" ]; then
+  SUMMARY_FAILURE="summarizer returned empty output"
+fi
+if [ -n "$SUMMARY_FAILURE" ]; then
+  SUMMARY="- Memory summary unavailable: ${SUMMARY_FAILURE}; transcript content was omitted. Use the transcript anchor for progressive disclosure."
 fi
 
 # Append under a session heading, writing the heading lazily on the first
