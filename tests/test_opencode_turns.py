@@ -3,9 +3,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import sqlite3
+import subprocess
 import sys
 from contextlib import suppress
 from pathlib import Path
+
+import pytest
 
 SCRIPT_DIR = Path(__file__).resolve().parent.parent / "plugins" / "opencode" / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
@@ -32,6 +35,131 @@ from opencode_turns import (  # noqa: E402
     save_turn,
     save_turn_state,
 )
+
+
+def _write_utf8_memsearch_stub(path: Path) -> None:
+    path.write_text(
+        """\
+import os
+import sys
+
+
+def write(stream, value):
+    stream.buffer.write(value.encode("utf-8"))
+    stream.buffer.flush()
+
+
+args = sys.argv[1:]
+mode = os.environ.get("MEMSEARCH_STUB_MODE", "success")
+
+write(sys.stderr, "诊断丁: UTF-8 stderr\\n")
+if mode == "config-nonzero" and args[:2] == ["config", "get"]:
+    raise SystemExit(7)
+
+if args[:2] == ["config", "get"]:
+    values = {
+        "plugins.opencode.summarize.model": "模型/摘要",
+        "plugins.opencode.summarize.provider": "custom-provider",
+        "plugins.opencode.summarize.enabled": "true",
+        "prompts.summarize": os.environ["MEMSEARCH_STUB_PROMPT_PATH"],
+    }
+    write(sys.stdout, values[args[2]] + "\\n")
+elif args and args[0] == "summarize":
+    sys.stdin.buffer.read()
+    if mode == "summarize-nonzero":
+        raise SystemExit(7)
+    write(sys.stdout, "- 摘要包含非 ASCII\\n")
+else:
+    raise SystemExit(2)
+""",
+        encoding="utf-8",
+    )
+
+
+def _utf8_stub_command(stub: Path) -> str:
+    return f'"{sys.executable}" "{stub}"'
+
+
+def _record_subprocess_results_with_cp1252_default(monkeypatch, subprocess_module):
+    real_run = subprocess.run
+    completed = []
+
+    def run(*args, **kwargs):
+        if kwargs.get("text") and "encoding" not in kwargs:
+            kwargs["encoding"] = "cp1252"
+            kwargs["errors"] = "strict"
+        result = real_run(*args, **kwargs)
+        completed.append(result)
+        return result
+
+    monkeypatch.setattr(subprocess_module, "run", run)
+    return completed
+
+
+def test_memsearch_adapter_decodes_utf8_when_locale_is_cp1252(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    stub = tmp_path / "memsearch-stub.py"
+    prompt_dir = tmp_path / "自定义提示"
+    prompt_dir.mkdir()
+    prompt = prompt_dir / "摘要提示.txt"
+    prompt.write_text("为 {{AGENT_NAME}} 生成摘要", encoding="utf-8")
+    _write_utf8_memsearch_stub(stub)
+
+    monkeypatch.setenv("MEMSEARCH_STUB_PROMPT_PATH", str(prompt))
+    command = _utf8_stub_command(stub)
+    argv = [sys.executable, str(stub), "config", "get", "plugins.opencode.summarize.model"]
+
+    with pytest.raises(UnicodeDecodeError):
+        subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            encoding="cp1252",
+            errors="strict",
+            check=False,
+        )
+
+    completed = _record_subprocess_results_with_cp1252_default(monkeypatch, capture_daemon.subprocess)
+
+    assert capture_daemon.get_plugin_summarize_model(command) == "模型/摘要"
+    assert capture_daemon.get_plugin_summarize_provider(command) == "custom-provider"
+    assert capture_daemon.get_plugin_summarize_enabled(command) is True
+    assert capture_daemon._load_summarize_prompt("OpenCode", command) == "为 OpenCode 生成摘要"
+    assert capture_daemon.summarize_with_llm("用户: 请总结", "", command) == "- 摘要包含非 ASCII"
+    assert completed
+    assert all(result.stderr == "诊断丁: UTF-8 stderr\n" for result in completed)
+
+
+def test_memsearch_adapter_preserves_nonzero_fallbacks(tmp_path: Path, monkeypatch) -> None:
+    stub = tmp_path / "memsearch-stub.py"
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("unused", encoding="utf-8")
+    _write_utf8_memsearch_stub(stub)
+
+    monkeypatch.setenv("MEMSEARCH_STUB_MODE", "config-nonzero")
+    monkeypatch.setenv("MEMSEARCH_STUB_PROMPT_PATH", str(prompt))
+    command = _utf8_stub_command(stub)
+
+    assert capture_daemon.get_plugin_summarize_model(command) == ""
+    assert capture_daemon.get_plugin_summarize_provider(command) == ""
+    assert capture_daemon.get_plugin_summarize_enabled(command) is True
+
+    monkeypatch.setenv("MEMSEARCH_STUB_MODE", "summarize-nonzero")
+    assert capture_daemon.summarize_with_llm("turn", "", command) is None
+
+
+def test_memsearch_adapter_preserves_timeout_fallbacks(monkeypatch) -> None:
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(capture_daemon.subprocess, "run", timeout)
+
+    assert capture_daemon.get_plugin_summarize_model("memsearch") == ""
+    assert capture_daemon.get_plugin_summarize_provider("memsearch") == ""
+    assert capture_daemon.get_plugin_summarize_enabled("memsearch") is True
+    assert capture_daemon.summarize_with_llm("turn", "", "memsearch") is None
 
 
 def test_opencode_config_resolution_uses_jsonc_and_env_dir_precedence(tmp_path: Path, monkeypatch) -> None:

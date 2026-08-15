@@ -551,11 +551,15 @@ def _is_relative_to(path: Path, root: Path) -> bool:
 
 
 def _run_restricted(argv: list[str], cwd: Path) -> str:
+    text_options = {}
+    if Path(argv[0]).name.lower() in {"memsearch", "memsearch.exe"}:
+        text_options = {"encoding": "utf-8", "errors": "strict"}
     try:
         result = subprocess.run(
             argv,
             capture_output=True,
             text=True,
+            **text_options,
             cwd=str(cwd),
             env={**os.environ, "MEMSEARCH_NO_WATCH": "1"},
             timeout=15,

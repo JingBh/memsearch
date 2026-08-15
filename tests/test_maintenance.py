@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from memsearch import maintenance
 from memsearch.config import LLMProviderConfig, MemSearchConfig, PluginMaintenanceTaskConfig
 from memsearch.maintenance import (
     MAX_PROMPT_CHARS,
@@ -512,3 +514,104 @@ def test_run_memory_command_allows_transcript_outside_roots(tmp_path: Path) -> N
     # A non-transcript command pointed outside the roots is still rejected.
     rejected = run_memory_command(f"grep foo {tmp_path}/outside.txt", ctx)
     assert "outside allowed memory roots" in rejected
+
+
+def test_run_memory_command_decodes_only_memsearch_as_utf8(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "repo"
+    memory = project / ".memsearch" / "memory"
+    memory.mkdir(parents=True)
+    stub_dir = tmp_path / "bin"
+    stub_dir.mkdir()
+    stub = stub_dir / "memsearch"
+    stub.write_text(
+        """\
+#!/usr/bin/env python3
+import os
+import sys
+
+sys.stdout.buffer.write("展开结果丁: 中文内容\\n".encode("utf-8"))
+sys.stderr.buffer.write("诊断丁: UTF-8 stderr\\n".encode("utf-8"))
+raise SystemExit(int(os.environ.get("MEMSEARCH_STUB_EXIT", "0")))
+""",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{stub_dir}{os.pathsep}{os.environ['PATH']}")
+    ctx = TaskContext(
+        platform="codex",
+        task="project_review",
+        task_config=PluginMaintenanceTaskConfig(),
+        project_dir=project,
+        memsearch_dir=project / ".memsearch",
+        input_dir=memory,
+        output_file=project / "PROJECT.md",
+        input_digest="sha256:test",
+    )
+
+    with pytest.raises(UnicodeDecodeError):
+        subprocess.run(
+            [str(stub), "expand", "deadbeef"],
+            capture_output=True,
+            text=True,
+            encoding="cp1252",
+            errors="strict",
+            check=False,
+        )
+
+    real_run = subprocess.run
+    completed = []
+
+    def cp1252_default(*args, **kwargs):
+        if kwargs.get("text") and "encoding" not in kwargs:
+            kwargs["encoding"] = "cp1252"
+            kwargs["errors"] = "strict"
+        result = real_run(*args, **kwargs)
+        completed.append(result)
+        return result
+
+    monkeypatch.setattr(maintenance.subprocess, "run", cp1252_default)
+
+    assert run_memory_command("memsearch expand deadbeef", ctx) == "展开结果丁: 中文内容"
+    assert completed[-1].stderr == "诊断丁: UTF-8 stderr\n"
+    assert completed[-1].returncode == 0
+
+    monkeypatch.setenv("MEMSEARCH_STUB_EXIT", "7")
+    assert run_memory_command("memsearch transcript outside.jsonl", ctx) == "展开结果丁: 中文内容"
+    assert completed[-1].stderr == "诊断丁: UTF-8 stderr\n"
+    assert completed[-1].returncode == 7
+
+
+def test_run_memory_command_preserves_error_fallback_and_local_command_encoding(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project = tmp_path / "repo"
+    memory = project / ".memsearch" / "memory"
+    memory.mkdir(parents=True)
+    ctx = TaskContext(
+        platform="codex",
+        task="project_review",
+        task_config=PluginMaintenanceTaskConfig(),
+        project_dir=project,
+        memsearch_dir=project / ".memsearch",
+        input_dir=memory,
+        output_file=project / "PROJECT.md",
+        input_digest="sha256:test",
+    )
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if Path(argv[0]).name.lower() == "memsearch":
+            raise OSError("command failed")
+        return subprocess.CompletedProcess(argv, 0, stdout="local output\n", stderr="")
+
+    monkeypatch.setattr(maintenance.subprocess, "run", fake_run)
+
+    assert run_memory_command("memsearch expand deadbeef", ctx) == "Error: command failed"
+    assert calls[-1][1]["encoding"] == "utf-8"
+    assert calls[-1][1]["errors"] == "strict"
+
+    assert run_memory_command(f"find {memory} -name '*.md'", ctx) == "local output"
+    assert "encoding" not in calls[-1][1]
+    assert "errors" not in calls[-1][1]

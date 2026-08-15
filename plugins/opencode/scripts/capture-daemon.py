@@ -299,6 +299,8 @@ def get_plugin_summarize_model(memsearch_cmd: str | None = None) -> str:
             [*split_memsearch_cmd(memsearch_cmd), "config", "get", "plugins.opencode.summarize.model"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="strict",
             timeout=5,
         )
         return result.stdout.strip()
@@ -315,6 +317,8 @@ def get_plugin_summarize_provider(memsearch_cmd: str | None = None) -> str:
             [*split_memsearch_cmd(memsearch_cmd), "config", "get", "plugins.opencode.summarize.provider"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="strict",
             timeout=5,
         )
         return result.stdout.strip()
@@ -331,6 +335,8 @@ def get_plugin_summarize_enabled(memsearch_cmd: str | None = None) -> bool:
             [*split_memsearch_cmd(memsearch_cmd), "config", "get", "plugins.opencode.summarize.enabled"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="strict",
             timeout=5,
         )
         return result.stdout.strip().lower() != "false"
@@ -362,6 +368,8 @@ def _load_summarize_prompt(agent_name: str, memsearch_cmd: str | None = None) ->
                 [*split_memsearch_cmd(memsearch_cmd), "config", "get", "prompts.summarize"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="strict",
                 timeout=5,
             )
             custom_path = result.stdout.strip()
@@ -408,6 +416,8 @@ def summarize_with_llm(
                 input=turn_text,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="strict",
                 timeout=30,
                 env={**os.environ, "MEMSEARCH_NO_WATCH": "1"},
             )
