@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from contextlib import suppress
 from pathlib import Path
 
 import click
@@ -168,6 +169,21 @@ def _load_plugin_summarize_prompt(cfg: MemSearchConfig, agent_name: str) -> str:
 # -- Common CLI options --
 
 
+def _configure_cli_streams() -> None:
+    """Configure CLI output streams for reliable Unicode output."""
+    for stream in (sys.stdout, sys.stderr):
+        with suppress(AttributeError, OSError):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+class _MemSearchGroup(click.Group):
+    """Configure CLI streams before Click parses arguments or exits eagerly."""
+
+    def main(self, *args, **kwargs):
+        _configure_cli_streams()
+        return super().main(*args, **kwargs)
+
+
 def _common_options(f):
     """Shared options for commands that create a MemSearch instance."""
     f = click.option("--provider", "-p", default=None, help="Embedding provider.")(f)
@@ -200,7 +216,7 @@ def _indexing_options(f):
     return f
 
 
-@click.group()
+@click.group(cls=_MemSearchGroup)
 @click.version_option(package_name="memsearch")
 def cli() -> None:
     """memsearch — semantic memory search for markdown knowledge bases."""
