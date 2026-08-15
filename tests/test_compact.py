@@ -67,6 +67,87 @@ async def test_openai_compact_uses_default_temperature(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content",
+    [
+        [SimpleNamespace(type="text", text="summary")],
+        [
+            SimpleNamespace(type="thinking", thinking="considering...", signature="sig"),
+            SimpleNamespace(type="text", text="summary"),
+        ],
+        [
+            SimpleNamespace(type="thinking", thinking="considering...", signature="sig"),
+            SimpleNamespace(type="redacted_thinking", data="redacted"),
+            SimpleNamespace(type="text", text="summary"),
+        ],
+    ],
+    ids=["text-first", "thinking-first", "multiple-non-text-blocks"],
+)
+async def test_anthropic_compact_returns_first_text_block(monkeypatch, content) -> None:
+    """Anthropic responses may contain non-text blocks before their text."""
+
+    class FakeMessages:
+        async def create(self, **kwargs):
+            return SimpleNamespace(content=content)
+
+    class FakeAsyncAnthropic:
+        def __init__(self, **kwargs):
+            self.messages = FakeMessages()
+
+    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(AsyncAnthropic=FakeAsyncAnthropic))
+
+    assert await compact_module._compact_anthropic("prompt", "claude-test") == "summary"
+
+
+@pytest.mark.asyncio
+async def test_anthropic_compact_raises_when_no_text_block(monkeypatch) -> None:
+    """A successful compact must not silently accept a response without text."""
+
+    class FakeMessages:
+        async def create(self, **kwargs):
+            return SimpleNamespace(
+                content=[
+                    SimpleNamespace(type="thinking", thinking="...", signature="sig"),
+                    SimpleNamespace(type="redacted_thinking", data="redacted"),
+                ]
+            )
+
+    class FakeAsyncAnthropic:
+        def __init__(self, **kwargs):
+            self.messages = FakeMessages()
+
+    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(AsyncAnthropic=FakeAsyncAnthropic))
+
+    with pytest.raises(ValueError, match="Anthropic response contained no text block"):
+        await compact_module._compact_anthropic("prompt", "claude-test")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "block, missing_attribute",
+    [
+        (SimpleNamespace(text="summary"), "type"),
+        (SimpleNamespace(type="text"), "text"),
+    ],
+)
+async def test_anthropic_compact_rejects_malformed_blocks(monkeypatch, block, missing_attribute) -> None:
+    """Malformed SDK objects must remain visible as protocol errors."""
+
+    class FakeMessages:
+        async def create(self, **kwargs):
+            return SimpleNamespace(content=[block])
+
+    class FakeAsyncAnthropic:
+        def __init__(self, **kwargs):
+            self.messages = FakeMessages()
+
+    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(AsyncAnthropic=FakeAsyncAnthropic))
+
+    with pytest.raises(AttributeError, match=missing_attribute):
+        await compact_module._compact_anthropic("prompt", "claude-test")
+
+
+@pytest.mark.asyncio
 async def test_compact_chunks_dispatches_to_anthropic(monkeypatch) -> None:
     captured: dict[str, str] = {}
 

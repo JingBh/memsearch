@@ -126,7 +126,13 @@ async def _compact_anthropic(prompt: str, model: str) -> str:
         max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )
-    return resp.content[0].text
+    # A model may emit a ThinkingBlock before the TextBlock, in which case
+    # content[0] has no .text and indexing it raises AttributeError. Pick the
+    # first text block instead of assuming its position.
+    for block in resp.content:
+        if block.type == "text":
+            return block.text
+    raise ValueError("Anthropic response contained no text block")
 
 
 async def _compact_gemini(prompt: str, model: str) -> str:
