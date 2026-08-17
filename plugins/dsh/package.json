@@ -1,0 +1,39 @@
+{
+  "name": "memsearch-dsh",
+  "version": "0.1.0",
+  "description": "MemSearch plugin for DeepSeek Harness: shared markdown memory across agents, with capture, pre-step context injection, and memory-recall skill.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": {
+      "types": null,
+      "default": "./index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "prompts/",
+    "skills/",
+    "scripts/"
+  ],
+  "license": "MIT",
+  "keywords": [
+    "memsearch",
+    "memory",
+    "deepseek-harness",
+    "cordis",
+    "plugin"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": "*"
+  }
+}

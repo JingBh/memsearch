@@ -1,0 +1,24 @@
+# memsearch-dsh bundle patch: inserts the memsearch plugin into a DSH
+# profile's plugin tree.
+#
+# This patch is applied as one extra layer when the package is installed via
+# `dsh plugin --profile <name> add <path>` (see README.md). A later user
+# override in the profile's own cordis.patch.yml can address the same `id` to
+# tune `config`, and removing the dependency removes the row.
+
+- insert:
+    - id: memsearch
+      name: 'memsearch-dsh'
+      config:
+        # Optional overrides — see README.md for the full set:
+        #   captureEnabled (bool, default true)
+        #   injectEnabled (bool, default true)
+        #   summarizeEnabled (bool, default true)
+        #   summarizeProvider (string, default '')  -> name of an [llm.providers.*] entry
+        #   summarizeModel (string, default '')      -> model override for summarization
+        #   memsearchDir (string, default '')        -> override <project>/.memsearch
+        #   collection (string, default '')          -> override the Milvus collection name
+        #   milvusUri (string, default '')           -> point search/index at a dedicated Milvus
+        #                                               (uri or path) instead of memsearch's config
+        #   agentName (string, default 'DeepSeek Harness')
+        {}
