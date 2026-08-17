@@ -115,6 +115,68 @@ _json_encode_str() {
   return 0
 }
 
+# _resolve_symlinks <path>
+# Follow a symlink chain to its target without `readlink -f`, which BSD
+# readlink (macOS) does not support. Relative link targets resolve against
+# the link's directory; a hop cap guards against cycles. The directory part
+# is canonicalized with `pwd -P` so `..` segments and directory symlinks
+# collapse the way GNU `readlink -f` would collapse them.
+_resolve_symlinks() {
+  local target="$1" link dir hops=0
+  while [ -L "$target" ] && [ "$hops" -lt 40 ]; do
+    link=$(readlink "$target" 2>/dev/null) || break
+    case "$link" in
+      /*) target="$link" ;;
+      *) target="$(dirname "$target")/$link" ;;
+    esac
+    hops=$((hops + 1))
+  done
+  dir=$(cd "$(dirname "$target")" 2>/dev/null && pwd -P) || { printf '%s' "$target"; return 0; }
+  printf '%s/%s' "$dir" "${target##*/}"
+}
+
+# Resolve the installed memsearch version from its dist-info directory name.
+# Callers already spend one CLI start reading config; asking the CLI for
+# `--version` spawns a second Python interpreter (~0.3s warm, several seconds
+# cold) purely to render a status string. Prints nothing when no dist-info is
+# discoverable (uvx, editable installs) so callers can fall back to the CLI.
+_installed_version_from_dist_info() {
+  local bin real candidate
+  bin=$(command -v memsearch 2>/dev/null) || return 0
+  [ -n "$bin" ] || return 0
+  real=$(_resolve_symlinks "$bin")
+  for candidate in "${real%/bin/memsearch}"/lib/python*/site-packages/memsearch-*.dist-info; do
+    [ -d "$candidate" ] || continue
+    candidate=${candidate##*/memsearch-}
+    candidate=${candidate%.dist-info}
+    # Require a version-shaped string so a sibling distribution whose name
+    # starts with "memsearch-" cannot be mistaken for the package itself.
+    case "$candidate" in
+      [0-9]*) printf '%s' "$candidate"; return 0 ;;
+    esac
+  done
+}
+
+# Latest memsearch version on PyPI, cached for 24h. Keeps the update hint
+# current without making every session start wait on a network round trip: an
+# unreachable PyPI otherwise costs the full curl timeout on every start.
+# Prints nothing when the lookup fails.
+_pypi_latest_version() {
+  local cache="$HOME/.memsearch/.pypi-latest" latest json
+  # A cache file younger than a day is authoritative even when it is empty: an
+  # empty file records a lookup that failed, so an offline machine stops
+  # re-paying the curl timeout on every session start.
+  if [ -n "$(find "$cache" -mtime -1 2>/dev/null)" ]; then
+    cat "$cache" 2>/dev/null || true
+    return 0
+  fi
+  json=$(curl -s --max-time 2 https://pypi.org/pypi/memsearch/json 2>/dev/null || true)
+  latest=$(_json_val "$json" "info.version" "")
+  mkdir -p "$(dirname "$cache")" 2>/dev/null || true
+  printf '%s' "$latest" > "$cache" 2>/dev/null || true
+  printf '%s' "$latest"
+}
+
 # Return a concise user-facing warning when the persisted index state says
 # search may be stale. Detailed diagnosis stays in the memory-config skill.
 index_state_warning() {
