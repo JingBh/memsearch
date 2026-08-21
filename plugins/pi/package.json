@@ -1,0 +1,30 @@
+{
+  "name": "@zilliz/memsearch-pi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MemSearch extension for Pi",
+  "type": "module",
+  "main": "index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "keywords": [
+    "pi-package",
+    "memsearch",
+    "memory",
+    "semantic-search"
+  ],
+  "license": "MIT"
+}

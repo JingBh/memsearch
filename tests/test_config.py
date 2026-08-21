@@ -39,6 +39,8 @@ def test_default_config():
     assert cfg.plugins.claude_code.summarize.enabled is True
     assert cfg.plugins.claude_code.summarize.model == ""
     assert cfg.plugins.codex.summarize.model == ""
+    assert cfg.plugins.pi.summarize.model == ""
+    assert cfg.plugins.pi.project_review.enabled is False
     assert cfg.plugins.codex.project_review.enabled is False
     assert cfg.plugins.codex.project_review.min_interval_hours == 24
     assert cfg.plugins.codex.project_review.input_dir == ".memsearch/memory"
@@ -569,6 +571,7 @@ def test_plugins_config_defaults():
     cfg = PluginsConfig()
     assert cfg.claude_code.summarize.model == ""
     assert cfg.codex.summarize.model == ""
+    assert cfg.pi.summarize.model == ""
     assert cfg.opencode.summarize.model == ""
     assert cfg.openclaw.summarize.model == ""
 

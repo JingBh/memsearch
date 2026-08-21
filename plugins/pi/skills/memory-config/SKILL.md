@@ -1,13 +1,13 @@
 ---
 name: memory-config
-description: "Diagnose and configure MemSearch memory behavior for the OpenClaw plugin. Use when the user asks about MemSearch configuration, plugin summarization, PROJECT.md/USER.md maintenance, memory directories, index health, provider routing, prompt files, or migration/compatibility questions."
+description: "Diagnose and configure MemSearch memory behavior for the Pi plugin. Use when the user asks about MemSearch configuration, plugin summarization, PROJECT.md/USER.md maintenance, memory directories, index health, provider routing, prompt files, or migration/compatibility questions."
 ---
 
-You are a MemSearch configuration assistant for the OpenClaw plugin. This skill manages MemSearch settings only. It is not OpenClaw's built-in memory configuration.
+You are a MemSearch configuration assistant for the Pi plugin. This skill manages MemSearch settings only. It is not Pi's built-in memory configuration.
 
 In diagnostic summaries or final answers, state once that this is MemSearch
-memory configuration, not OpenClaw's own memory/config system. Do not prepend
-that sentence to every progress update or every paragraph.
+memory configuration, not Pi's own memory/config system. Do not prepend that
+sentence to every progress update or every paragraph.
 
 When this skill is triggered, inspect the user's request text. If there is no concrete request, run a diagnostic. If they ask for a specific setting or change, route the request using the flows below.
 
@@ -48,13 +48,11 @@ from different channels:
 
 - CLI latest version comes from PyPI package `memsearch`. Update with
   `uv tool install -U "memsearch[onnx]"` or `uv tool upgrade memsearch`.
-- Codex plugin has no independent package/version file. Inspect
-  `${CODEX_HOME:-$HOME/.codex}/hooks.json` to find the hook source path, then
-  compare that repository with the latest `zilliztech/memsearch` GitHub release:
-  `git -C <memsearch-repo> describe --tags --always --dirty` and
-  `gh release view --repo zilliztech/memsearch --json tagName,publishedAt,url`.
-  Update source installs with `git pull` plus
-  `bash plugins/codex/scripts/install.sh`.
+- Pi plugin has no independent package/version file. Resolve the extension source
+  with `realpath "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/extensions/memsearch"`,
+  then inspect that repository with `git -C <memsearch-repo> describe --tags --always --dirty`.
+  Source installs update when that repository and the extension symlink are updated; run
+  Pi's `/reload` command afterward.
 - Claude Code plugin latest marketplace/source version is in
   `plugins/claude-code/.claude-plugin/plugin.json` and
   `.claude-plugin/marketplace.json` in the `zilliztech/memsearch` repo. Check
@@ -73,27 +71,20 @@ from different channels:
   pins a version, update the pin; otherwise restart OpenCode after package
   refresh.
 
-For more detail, fetch the update sections from the public documentation:
+For Pi-specific details, read `plugins/pi/README.md` in the resolved MemSearch repository.
 
-- Codex: https://zilliztech.github.io/memsearch/platforms/codex/installation/
-- Claude Code: https://zilliztech.github.io/memsearch/platforms/claude-code/installation/
-- OpenClaw: https://zilliztech.github.io/memsearch/platforms/openclaw/installation/
-- OpenCode: https://zilliztech.github.io/memsearch/platforms/opencode/installation/
-
-Check memory files:
+Resolve the centralized project store before inspecting files or running stateful CLI commands:
 
 ```bash
-MDIR="${MEMSEARCH_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.memsearch}/memory"
+PLUGIN=$(realpath "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/extensions/memsearch")
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+COLLECTION=$(bash "$PLUGIN/scripts/derive-collection.sh" "$ROOT")
+STATE_DIR="${MEMSEARCH_DIR:-$HOME/.memsearch/projects/$COLLECTION}"
+MDIR="$STATE_DIR/memory"
 ls -la "$MDIR"
 find "$MDIR" -maxdepth 1 -type f -name '*.md' | sort | tail -10
 tail -120 "$MDIR/$(date +%Y-%m-%d).md"
-```
-
-Check index health:
-
-```bash
-memsearch stats
-STATE_DIR="${MEMSEARCH_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.memsearch}"
+MEMSEARCH_DIR="$STATE_DIR" memsearch stats
 test -f "$STATE_DIR/.index-state.json" && cat "$STATE_DIR/.index-state.json"
 ```
 
@@ -112,7 +103,7 @@ Some plugin config fields may be missing or empty. That is usually normal:
 
 Config is resolved from built-in defaults, global config, project config, env refs like `env:OPENAI_API_KEY`, and runtime env such as `MEMSEARCH_DIR`.
 
-Use `memsearch config list --resolved` for effective behavior, `--global` for global overrides, and `--project` for workspace-specific overrides.
+Use `memsearch config list --resolved` for effective behavior, `--global` for global overrides, and `--project` for repository-specific overrides.
 
 Since v0.4.11, project-local `.memsearch.toml` is restricted before it is merged.
 Only these low-risk local indexing keys are honored from project config:
@@ -137,28 +128,28 @@ config (`~/.memsearch/config.toml`) or pass explicit CLI flags instead:
 - provider/model/API endpoint/API key settings
 - `[llm]` and `[llm.providers.*]`
 - `[prompts]`
-- plugin automation such as `plugins.openclaw.project_review.enabled`,
-  `plugins.openclaw.user_profile.enabled`, and
-  `plugins.openclaw.memory_to_skill.enabled`
+- plugin automation such as `plugins.pi.project_review.enabled`,
+  `plugins.pi.user_profile.enabled`, and
+  `plugins.pi.memory_to_skill.enabled`
 
 Default recommendation:
 
 - Put reusable defaults in global config so users do not repeat setup in every project.
 - Put only allowlisted local indexing overrides in project config.
 - Use global config for named LLM providers, common model choices, plugin enable/disable switches, task intervals, install paths, and shared prompt defaults.
-- If the user wants advanced maintenance enabled for all projects, set the plugin keys globally. Paths under `.memsearch/` resolve inside each workspace/project's centralized MemSearch store.
+- If the user wants advanced maintenance enabled for all projects, set the plugin keys globally. Paths under `.memsearch/` resolve inside each project's centralized store at `~/.memsearch/projects/<collection>/`.
 
-The defaults `.memsearch/memory`, `.memsearch/PROJECT.md`, and `.memsearch/USER.md` resolve under the explicit `MEMSEARCH_DIR` or its centralized per-project store, so they remain project-scoped without writing into the workspace. Other relative paths still resolve from the workspace/project directory. For custom prompt paths, prefer absolute paths in global config; project prompt paths are not trusted.
+The defaults `.memsearch/memory`, `.memsearch/PROJECT.md`, and `.memsearch/USER.md` therefore remain project-scoped without writing into the checkout. Other relative paths still resolve from the project directory. For custom prompt paths, prefer absolute paths in global config; project prompt paths are not trusted.
 
-OpenClaw plugin keys:
+Pi plugin keys:
 
 ```toml
-[plugins.openclaw.summarize]
+[plugins.pi.summarize]
 enabled = true
-provider = ""      # empty/native = OpenClaw native summarizer
+provider = ""      # empty/native = Pi native summarizer
 model = ""
 
-[plugins.openclaw.project_review]
+[plugins.pi.project_review]
 enabled = false
 provider = "native"
 model = ""
@@ -166,7 +157,7 @@ min_interval_hours = 24
 input_dir = ".memsearch/memory"
 output_file = ".memsearch/PROJECT.md"
 
-[plugins.openclaw.user_profile]
+[plugins.pi.user_profile]
 enabled = false
 provider = "native"
 model = ""
@@ -174,7 +165,7 @@ min_interval_hours = 24
 input_dir = ".memsearch/memory"
 output_file = ".memsearch/USER.md"
 
-[plugins.openclaw.memory_to_skill]
+[plugins.pi.memory_to_skill]
 enabled = false
 min_occurrences = 3   # how many times a workflow must recur before it is distilled
 paths = []            # where installed skills are copied; empty = ask the user
@@ -182,9 +173,9 @@ paths = []            # where installed skills are copied; empty = ask the user
 
 Provider rules:
 
-- `provider = ""` or `native` uses OpenClaw's non-interactive native path.
+- `provider = ""` or `native` uses Pi's non-interactive native path.
 - Any other provider value is a name that must exist under `[llm.providers.<name>]`.
-- Model resolution order is task-level `plugins.openclaw.<task>.model`, then named provider model, then built-in default.
+- Model resolution order is task-level `plugins.pi.<task>.model`, then named provider model, then built-in default.
 - API keys should be configured as env refs, not pasted into chat.
 - If a raw TOML field is blank, check resolved config before calling it unset or broken.
 
@@ -209,20 +200,20 @@ api_key = "env:GEMINI_API_KEY"
 
 Model guidance:
 
-- Normal turn summaries can use small/fast models. OpenClaw native summarize uses the OpenClaw agent/default model unless overridden.
-- Advanced maintenance needs better judgment. OpenClaw native maintenance also uses the OpenClaw agent/default model unless `plugins.openclaw.<task>.model` is set.
+- Normal turn summaries can use small/fast models. With an empty native model setting, Pi uses its configured default model.
+- Advanced maintenance needs better judgment. Pi native maintenance uses the Pi default unless `plugins.pi.<task>.model` is set.
 - For API providers, defaults are `openai -> gpt-5-mini`, `anthropic -> claude-sonnet-4-6`, and `gemini -> gemini-3-flash-preview`.
-- If quality matters more than cost for maintenance, set `plugins.openclaw.project_review.model` and `plugins.openclaw.user_profile.model` explicitly.
+- If quality matters more than cost for maintenance, set `plugins.pi.project_review.model` and `plugins.pi.user_profile.model` explicitly.
 
 Advanced maintenance runs after the plugin wakes it, only when enabled, journal input changed, and `min_interval_hours` elapsed. `PROJECT.md` and `USER.md` are maintenance artifacts by default and are not automatically indexed.
 
-If indexing seems silent or search looks stale, check `.memsearch/.index-state.json`
+If indexing seems silent or search looks stale, check `$STATE_DIR/.index-state.json`
 for `status`, `last_error`, and `failed_files`. `status: degraded` means the
 scan completed but one or more files failed; `status: error` means the index run
 did not complete.
 
 If advanced maintenance or `memory_to_skill` seems silent, check
-`.memsearch/.maintenance-state.json` for `<plugin>.<task>.last_error` and
+`$STATE_DIR/.maintenance-state.json` for `<plugin>.<task>.last_error` and
 `last_failed_at`; background hook errors may not surface in the chat.
 
 Before enabling advanced maintenance, ask which provider to use, whether the default 24-hour interval is acceptable, whether `.memsearch/PROJECT.md` / `.memsearch/USER.md` are acceptable output files, and whether the user wants the enablement global. Do not write plugin automation keys with `--project`; v0.4.11+ project config ignores or rejects them.
@@ -241,6 +232,6 @@ Empty prompt paths mean use the built-in MemSearch prompts. Custom prompt files 
 
 Use `memsearch config set` for changes. For trusted keys such as `plugins.*`, `[llm.providers.*]`, `[prompts]`, `embedding.provider`, or `milvus.uri`, set global config by omitting `--project`. Use `--project` only for allowlisted local indexing keys. After changing anything, show the command, the resolved value, and whether a new session is needed.
 
-MemSearch TOML changes are read lazily by the CLI, OpenClaw plugin hooks/tools, and maintenance runner, so values such as `plugins.openclaw.summarize.*`, `plugins.openclaw.project_review.*`, `plugins.openclaw.user_profile.*`, `[llm.providers.*]`, `[prompts]`, `milvus.*`, and `embedding.*` usually apply on the next capture, recall, index, or maintenance invocation. Run `openclaw gateway restart` after plugin install/update or hook permission changes, because the gateway may already have loaded the old plugin state. In final diagnostic/change summaries, make clear that this is MemSearch memory configuration, not OpenClaw's own memory/config system.
+MemSearch TOML changes are read lazily by the CLI, extension, and maintenance runner, so values such as `plugins.pi.summarize.*`, `plugins.pi.project_review.*`, `plugins.pi.user_profile.*`, `[llm.providers.*]`, `[prompts]`, `milvus.*`, and `embedding.*` usually apply on the next capture, recall, index, or maintenance invocation. Run Pi's `/reload` command after extension, skill, or local agent-file changes because the current runtime may already have loaded the old resources. In final diagnostic/change summaries, make clear that this is MemSearch memory configuration, not Pi's own memory/config system.
 
 When useful, remind the user that they can either continue using this `memory-config` skill for guided configuration, or manually run `memsearch config init` for global interactive setup, `memsearch config init --project` for allowlisted project indexing setup, and `memsearch config set/get/list` for direct CLI changes.

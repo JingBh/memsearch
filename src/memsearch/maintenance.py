@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -87,6 +88,7 @@ def run_due_tasks(
 
         input_dir = _resolve_task_path(task_cfg.input_dir or str(mem_root / "memory"), project_root, mem_root)
         output_file = _resolve_task_path(task_cfg.output_file, project_root, mem_root)
+        _migrate_legacy_task_output(task_cfg.output_file, project_root, output_file)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         digest = _input_digest(input_dir)
@@ -172,13 +174,23 @@ def _get_task_config(cfg: MemSearchConfig, platform: str, task_name: str) -> Plu
 
 
 def _resolve_task_path(raw_path: str, project_dir: Path, memsearch_dir: Path) -> Path:
-    path_text = raw_path or ""
-    if path_text == ".memsearch/memory":
-        return (memsearch_dir / "memory").resolve()
-    path = Path(path_text).expanduser()
+    path = Path(raw_path or "").expanduser()
+    if not path.is_absolute() and path.parts[:1] == (".memsearch",):
+        return memsearch_dir.joinpath(*path.parts[1:]).resolve()
     if not path.is_absolute():
         path = project_dir / path
     return path.resolve()
+
+
+def _migrate_legacy_task_output(raw_path: str, project_dir: Path, output_file: Path) -> None:
+    path = Path(raw_path or "").expanduser()
+    if path.is_absolute() or path.parts[:1] != (".memsearch",):
+        return
+    legacy_file = (project_dir / path).resolve()
+    if legacy_file == output_file or not legacy_file.is_file() or output_file.exists():
+        return
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(legacy_file), str(output_file))
 
 
 def _input_digest(input_dir: Path) -> str:

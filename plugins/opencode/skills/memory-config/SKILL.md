@@ -148,9 +148,9 @@ Default recommendation:
 - Put reusable defaults in global config so users do not repeat setup in every project.
 - Put only allowlisted local indexing overrides in project config.
 - Use global config for named LLM providers, common model choices, plugin enable/disable switches, task intervals, install paths, and shared prompt defaults.
-- If the user wants advanced maintenance enabled for all projects, set the plugin keys globally. The default relative `input_dir` / `output_file` values still resolve inside each current project.
+- If the user wants advanced maintenance enabled for all projects, set the plugin keys globally. Paths under `.memsearch/` resolve inside each project's centralized MemSearch store.
 
-Maintenance `input_dir` and `output_file` may be relative even when configured globally. They are resolved from the current project directory at runtime, so a global `output_file = ".memsearch/PROJECT.md"` writes to each project's own `.memsearch/PROJECT.md`. For custom prompt paths, prefer absolute paths in global config; project prompt paths are not trusted.
+The defaults `.memsearch/memory`, `.memsearch/PROJECT.md`, and `.memsearch/USER.md` resolve under the explicit `MEMSEARCH_DIR` or its centralized per-project store, so they remain project-scoped without writing into the checkout. Other relative paths still resolve from the project directory. For custom prompt paths, prefer absolute paths in global config; project prompt paths are not trusted.
 
 OpenCode plugin keys:
 

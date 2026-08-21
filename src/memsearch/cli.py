@@ -792,7 +792,7 @@ def compact(
 
 
 @cli.command()
-@click.option("--plugin", required=True, help="Plugin platform name (claude-code, codex, opencode, openclaw).")
+@click.option("--plugin", required=True, help="Plugin platform name (claude-code, codex, pi, opencode, openclaw).")
 @click.option("--agent-name", default="", help="Agent display name for the summarize prompt.")
 def summarize(plugin: str, agent_name: str) -> None:
     """Summarize stdin using a configured memsearch-managed LLM provider."""
@@ -1096,6 +1096,7 @@ def config_init(project: bool) -> None:
     result["plugins"] = {
         "claude-code": {"summarize": {}, "project_review": {}, "user_profile": {}},
         "codex": {"summarize": {}, "project_review": {}, "user_profile": {}},
+        "pi": {"summarize": {}, "project_review": {}, "user_profile": {}},
         "opencode": {"summarize": {}, "project_review": {}, "user_profile": {}},
         "openclaw": {"summarize": {}, "project_review": {}, "user_profile": {}},
     }
@@ -1122,6 +1123,18 @@ def config_init(project: bool) -> None:
     result["plugins"]["codex"]["summarize"]["model"] = click.prompt(
         "  Codex summarize model",
         default=current.plugins.codex.summarize.model,
+    )
+    result["plugins"]["pi"]["summarize"]["enabled"] = click.confirm(
+        "  Pi automatic summaries enabled",
+        default=current.plugins.pi.summarize.enabled,
+    )
+    result["plugins"]["pi"]["summarize"]["provider"] = click.prompt(
+        "  Pi summarize provider",
+        default=current.plugins.pi.summarize.provider,
+    )
+    result["plugins"]["pi"]["summarize"]["model"] = click.prompt(
+        "  Pi summarize model",
+        default=current.plugins.pi.summarize.model,
     )
     result["plugins"]["opencode"]["summarize"]["enabled"] = click.confirm(
         "  OpenCode automatic summaries enabled",
@@ -1153,6 +1166,7 @@ def config_init(project: bool) -> None:
     for key, label, current_platform in [
         ("claude-code", "Claude Code", current.plugins.claude_code),
         ("codex", "Codex", current.plugins.codex),
+        ("pi", "Pi", current.plugins.pi),
         ("opencode", "OpenCode", current.plugins.opencode),
         ("openclaw", "OpenClaw", current.plugins.openclaw),
     ]:
@@ -1261,7 +1275,7 @@ def skills_group() -> None:
 
 
 @skills_group.command("distill")
-@click.option("--plugin", required=True, help="Plugin platform name (claude-code, codex, opencode, openclaw).")
+@click.option("--plugin", required=True, help="Plugin platform name (claude-code, codex, pi, opencode, openclaw).")
 @click.option("--force", is_flag=True, help="Run even if input is unchanged or not yet due.")
 def skills_distill(plugin: str, force: bool) -> None:
     """Mine recent memory journals for recurring workflows using a configured API provider.

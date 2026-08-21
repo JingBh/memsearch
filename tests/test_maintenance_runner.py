@@ -19,6 +19,15 @@ def _load_runner():
     return module
 
 
+def _load_pi_runner():
+    path = Path(__file__).resolve().parents[1] / "plugins" / "pi" / "scripts" / "maintenance-runner.py"
+    spec = importlib.util.spec_from_file_location("memsearch_pi_maintenance_runner", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_plugin_maintenance_runner_copies_match_shared() -> None:
     root = Path(__file__).resolve().parents[1]
     shared = (root / "plugins" / "_shared" / "scripts" / "maintenance-runner.py").read_text(encoding="utf-8")
@@ -127,6 +136,36 @@ def test_claude_native_runner_passes_prompt_as_user_input(tmp_path: Path, monkey
     assert captured["cmd"][-1] == "maintenance prompt"
     assert captured["cmd"][captured["cmd"].index("--system-prompt") + 1] != "maintenance prompt"
     assert captured["env"]["CLAUDECODE"] == ""
+
+
+def test_pi_native_runner_is_ephemeral_and_disables_extensions(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_pi_runner()
+    captured = {}
+
+    def fake_run_command(cmd, *, env, cwd, timeout):
+        captured["cmd"] = cmd
+        captured["env"] = env
+        captured["cwd"] = cwd
+        return '{"action":"none","reason":"ok"}'
+
+    monkeypatch.setattr(runner, "run_command", fake_run_command)
+    ctx = SimpleNamespace(
+        platform="pi",
+        task="project_review",
+        project_dir=tmp_path,
+        task_config=SimpleNamespace(model="openai/gpt-5-mini"),
+    )
+
+    result = runner.run_native_provider(ctx, "maintenance prompt")
+
+    assert json.loads(result) == {"action": "none", "reason": "ok"}
+    assert captured["cmd"][0] == "pi"
+    assert "--no-session" in captured["cmd"]
+    assert "--no-extensions" in captured["cmd"]
+    assert "--no-tools" in captured["cmd"]
+    assert captured["cmd"][captured["cmd"].index("--model") + 1] == "openai/gpt-5-mini"
+    assert captured["cmd"][-1] == "maintenance prompt"
+    assert captured["env"]["MEMSEARCH_DISABLE"] == "1"
 
 
 def test_openclaw_native_runner_extracts_json_from_noisy_output(tmp_path: Path, monkeypatch) -> None:

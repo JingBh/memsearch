@@ -392,6 +392,39 @@ def test_maintenance_replace_writes_output_and_state(tmp_path: Path) -> None:
     assert state["codex.project_review"]["last_input_digest"].startswith("sha256:")
 
 
+def test_maintenance_centralizes_default_outputs_and_migrates_legacy_file(tmp_path: Path) -> None:
+    project = tmp_path / "repo"
+    legacy_dir = project / ".memsearch"
+    memory = tmp_path / "central" / "memory"
+    legacy_dir.mkdir(parents=True)
+    memory.mkdir(parents=True)
+    (memory / "2026-08-21.md").write_text("- Centralized journal.\n", encoding="utf-8")
+    legacy_output = legacy_dir / "PROJECT.md"
+    legacy_output.write_text("# Legacy project memory\n", encoding="utf-8")
+
+    cfg = MemSearchConfig()
+    cfg.plugins.pi.project_review.enabled = True
+    cfg.plugins.pi.project_review.provider = "openai"
+
+    def fake_runner(ctx, prompt: str) -> str:
+        assert ctx.input_dir == memory
+        assert ctx.output_file == tmp_path / "central" / "PROJECT.md"
+        assert "Legacy project memory" in prompt
+        return json.dumps({"action": "none", "reason": "migrated"})
+
+    results = run_due_tasks(
+        platform="pi",
+        project_dir=project,
+        memsearch_dir=tmp_path / "central",
+        cfg=cfg,
+        llm_runner=fake_runner,
+    )
+
+    assert results[0].action == "none"
+    assert (tmp_path / "central" / "PROJECT.md").read_text(encoding="utf-8") == "# Legacy project memory\n"
+    assert not legacy_output.exists()
+
+
 def test_maintenance_failure_records_state(tmp_path: Path) -> None:
     project = tmp_path / "repo"
     memory = project / ".memsearch" / "memory"
