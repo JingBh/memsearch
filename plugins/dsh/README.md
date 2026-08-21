@@ -9,6 +9,7 @@ backed by a Milvus hybrid search index.
 capture  ── session/event turn/end ──> summarize (dsh-headless agent default, or custom-llm) ──> memory/YYYY-MM-DD.md
 inject   ── agent/pre-step step 1  ──> memsearch search ──> relevant chunks injected (zero cost otherwise)
 recall   ── ctx.skills.register(memory-recall) ──> search → expand → transcript
+review   ── web UI dock panel ──> GET/POST /memsearch-dsh/* ──> list candidates / queue review / install
 ```
 
 ## Prerequisites
@@ -195,6 +196,32 @@ through the DSH logger.
   maintenance work is executed by a one-shot DSH headless agent (the same
   `dsh --profile headless` mechanism as summarization), booted with
   `MEMSEARCH_DSH_SUMMARIZE=1` so the plugin stays inert inside it.
+- **Skill review panel (web only)** — a non-blocking dock strip above the
+  composer (registered into the `conversation.input.dock` slot) lists skill
+  candidates distilled into `.memsearch/skill-candidates/`. It is served by the
+  plugin's browser half (`client.js`, declared through `dsh.client` in
+  `package.json`) and talks to the host through two JSON routes on the DSH web
+  server:
+  - `GET /memsearch-dsh/skill-candidates?sessionId=<id>` — lists candidates
+    (pending first) parsed from each candidate's `meta.json`.
+  - `POST /memsearch-dsh/skill-review` with `{ sessionId, name, action }`:
+    - `action: "review"` queues a `[memsearch] Skill candidate ...` user
+      message into the live agent's inbox (`agent.inbox.append('next-turn',
+      ...)`). The agent reviews the candidate on its next turn — non-blocking,
+      it never interrupts a running turn and never opens a blocking dialog.
+    - `action: "install"` runs `memsearch skills install <name> --path <dir>`
+      in the background (detached, unref'd) to the resolved target: the first
+      entry of `plugins.dsh.memory_to_skill.paths` in memsearch config
+      (relative entries resolve against the project dir), else the DSH default
+      `~/.agents/skills`, which the `skill-filesystem` provider watches and
+      loads automatically.
+  The project directory is resolved from the session id (its durable cwd), so
+  the panel reflects the project of the session you are viewing on a
+  multi-project web surface. The routes are registered once the DSH web server
+  service becomes available (the memsearch plugin mounts in the base bundle
+  layer, before the web server starts; `apply` retries on a 1s unref'd timer).
+  Headless / TUI profiles have no browser: the `webServer` service never
+  appears, no routes are registered, and everything else is unchanged.
 
 ## Uninstall
 
@@ -209,6 +236,13 @@ files and the Milvus index are left untouched.
 
 - The plugin is plain ESM with no build step — `dsh plugin add` links the
   checkout directly, so edits are live after a profile reload.
+- The browser half (`client.js`) is a prebuilt client-module bundle: it
+  registers its factory with `window.__ModuleLoader__.load({ id, factory })`
+  (the lazy CJS table the web shell serves at `/plugins/<id>/client.js`) and
+  exports the Cordis client plugin shape (`inject` + `apply`). It is checked
+  in as-is; edit it directly and keep the `__ModuleLoader__` registration
+  format (mirror the shipped `@deepseek-ai/dsh-client-ui-*` `lib/client.js`
+  bundles).
 - Python helpers under `scripts/` are linted with the repo's `ruff` config and
   tested under `plugins/dsh/tests/`.
 - Keep the memory-write format byte-compatible with the other platform
