@@ -44,6 +44,9 @@ class MemSearch:
     collection:
         Milvus collection name.  Use different names to isolate
         agents sharing the same Milvus server.
+    description:
+        Best-effort collection metadata written during creation. Some backends
+        may not return it; indexing and search do not depend on it.
     ignore_files:
         Ignore filenames to discover within each directory index root, such
         as ``[".gitignore"]``. Empty by default for backward compatibility.

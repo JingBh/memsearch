@@ -368,8 +368,10 @@ Data is stored in a single local `.db` file. No server to install, no ports to o
 
 **Best for:** personal use, single-agent setups, prototyping, development.
 
-!!! warning "Windows not supported"
-    Milvus Lite does not provide Windows binaries ([milvus-lite#176](https://github.com/milvus-io/milvus-lite/issues/176)). On Windows, use **Milvus Server** (Docker) or **Zilliz Cloud** instead. Alternatively, run memsearch inside [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install).
+!!! warning "Native Windows is best-effort"
+    Milvus Lite 3.x provides a Windows-capable foundation, and memsearch selects versions containing the required Windows fixes. This path has not received one-to-one native Windows validation by the memsearch maintainers and is not part of the formal support matrix. Use **Milvus Server**, **Zilliz Cloud**, or [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) if the local backend fails.
+
+Collection descriptions are best-effort metadata. Some Milvus Lite 3.x versions accept a description during collection creation but return an empty value later. Memsearch does not use description round-trip for indexing or search correctness.
 
 === "Python"
 

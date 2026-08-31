@@ -51,13 +51,13 @@ If you do not want to manage API keys, switch to a local provider such as ONNX, 
 
 ## Windows + Milvus Lite
 
-Milvus Lite (the default local `.db` backend) does not provide Windows binaries.
+Milvus Lite 3.x provides a Windows-capable foundation, and memsearch installs `milvus-lite>=3.1.1` with `pymilvus>=2.6.11` on Windows. The local path is best-effort because the memsearch maintainers have not completed one-to-one native Windows validation; it is not part of the formal support matrix.
 
-On Windows, use one of these options instead:
+If the local backend fails, use one of these alternatives:
 
 - Milvus Server via Docker
 - Zilliz Cloud
-- WSL2 if you specifically want the local Milvus Lite workflow
+- WSL2 for a Linux-based Milvus Lite workflow
 
 See [Getting Started — Milvus Backends](getting-started.md#milvus-backends).
 
@@ -71,12 +71,23 @@ Collection '...' is in state 'released'; call load() before search/get/query
 
 Upgrade memsearch first. Current memsearch versions explicitly load existing Milvus collections before query/search operations.
 
-If this started after upgrading Milvus Lite, check whether the local `.db` file was created by an older Milvus Lite release. Milvus Lite 3.x uses a new pure-Python storage engine and cannot read `.db` files from the previous storage format. Move the old `.db` file aside, then rebuild the index from source markdown:
+If this started after upgrading Milvus Lite, check whether the local `.db` file was created by an older Milvus Lite release. Milvus Lite 3.x uses a different storage layout and cannot automatically migrate a 2.x `.db` file. Preserve the old database and your source markdown, move the database aside manually, then rebuild the derived index from markdown:
 
-```bash
-mv ~/.memsearch/milvus.db ~/.memsearch/milvus.db.bak
-memsearch index . --force
-```
+=== "macOS / Linux"
+
+    ```bash
+    mv ~/.memsearch/milvus.db ~/.memsearch/milvus.db.bak
+    memsearch index . --force
+    ```
+
+=== "Windows PowerShell"
+
+    ```powershell
+    Move-Item "$HOME\.memsearch\milvus.db" "$HOME\.memsearch\milvus.db.bak"
+    memsearch index . --force
+    ```
+
+Do not delete the old database until the rebuilt index has been verified. Memsearch does not perform an in-place 2.x-to-3.x migration. Collection descriptions are also best-effort metadata in Lite 3.x: an empty value from `describe_collection()` does not indicate an indexing or search failure.
 
 Alternatively, keep using the older Milvus Lite environment that created the `.db` file, or switch to Milvus Server via Docker / Zilliz Cloud.
 

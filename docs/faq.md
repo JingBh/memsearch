@@ -10,13 +10,13 @@ See [Architecture — Indexing Cost Model](architecture.md#indexing-cost-model) 
 
 ## Does memsearch work on Windows?
 
-Yes, but **Milvus Lite** (the default local `.db` backend) does not provide Windows binaries.
+Milvus Server and Zilliz Cloud remain the recommended Windows backends. Milvus Lite 3.x now provides a Windows-capable foundation, so memsearch no longer blocks the default local backend on Windows. This local path is best-effort: it has not received one-to-one native Windows validation by the memsearch maintainers and is not part of the formal support matrix.
 
-If you are on Windows, use one of these options instead:
+If the local backend fails, use one of these alternatives:
 
 - **Milvus Server** via Docker
 - **Zilliz Cloud**
-- **WSL2** if you specifically want the Milvus Lite local-file workflow
+- **WSL2** for a Linux-based Milvus Lite local workflow
 
 See [Getting Started — Milvus Backends](getting-started.md#milvus-backends) for the backend comparison and recommended setup.
 

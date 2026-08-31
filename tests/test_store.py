@@ -190,21 +190,67 @@ def test_drop(store: MilvusStore):
 
 
 def test_collection_description(tmp_path: Path):
-    """Collection should store the description when provided."""
+    """Description is best-effort metadata and is not required for search."""
     db = str(tmp_path / "desc_test.db")
     desc = "myproject | openai/text-embedding-3-small"
     s = MilvusStore(uri=db, dimension=4, description=desc)
     info = s._client.describe_collection(s._collection)
-    assert info.get("description") == desc
+    assert info.get("description", "") in ("", desc)
+    s.upsert(
+        [
+            {
+                "embedding": [1.0, 0.0, 0.0, 0.0],
+                "content": "Search remains functional without description round-trip",
+                "source": "description.md",
+                "heading": "Metadata",
+                "chunk_hash": "description_hash",
+                "heading_level": 1,
+                "start_line": 1,
+                "end_line": 1,
+            }
+        ]
+    )
+    results = s.search([1.0, 0.0, 0.0, 0.0], query_text="description", top_k=1)
+    assert [result["chunk_hash"] for result in results] == ["description_hash"]
     s.close()
 
 
 def test_collection_description_empty_by_default(tmp_path: Path):
-    """Collection should have empty description when not provided."""
+    """An empty description must not prevent collection creation."""
     db = str(tmp_path / "desc_default_test.db")
     s = MilvusStore(uri=db, dimension=4)
     info = s._client.describe_collection(s._collection)
     assert info.get("description") == ""
+    s.close()
+
+
+def test_windows_local_uri_reaches_milvus_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """The Windows dependency floor replaces the obsolete runtime platform guard."""
+    connected: dict[str, str] = {}
+
+    class FakeMilvusClient:
+        def __init__(self, *, uri: str):
+            connected["uri"] = uri
+
+        def has_collection(self, collection_name: str) -> bool:
+            return True
+
+        def load_collection(self, collection_name: str) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class FakePyMilvus:
+        MilvusClient = FakeMilvusClient
+
+    db = tmp_path / "windows-local.db"
+    with monkeypatch.context() as patch:
+        patch.setitem(sys.modules, "pymilvus", FakePyMilvus())
+        patch.setattr(sys, "platform", "win32")
+        s = MilvusStore(uri=str(db), dimension=None)
+
+    assert connected["uri"] == str(db)
     s.close()
 
 
