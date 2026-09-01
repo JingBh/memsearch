@@ -230,7 +230,11 @@ def cli() -> None:
 @click.option(
     "--max-chunk-size", default=None, type=click.IntRange(min=1), help="Max chunk size in characters (must be >= 1)."
 )
-@click.option("--description", default=None, help="Collection description (written on creation only).")
+@click.option(
+    "--description",
+    default=None,
+    help="Best-effort collection metadata written on creation; some backends may not return it.",
+)
 def index(
     paths: tuple[str, ...],
     provider: str | None,
@@ -577,7 +581,11 @@ def _extract_section(
 @click.option(
     "--max-chunk-size", default=None, type=click.IntRange(min=1), help="Max chunk size in characters (must be >= 1)."
 )
-@click.option("--description", default=None, help="Collection description (written on creation only).")
+@click.option(
+    "--description",
+    default=None,
+    help="Best-effort collection metadata written on creation; some backends may not return it.",
+)
 def watch(
     paths: tuple[str, ...],
     provider: str | None,

@@ -148,7 +148,7 @@ Step by step:
     - Agent identified selectinload as the fix and applied it to get_orders()
     - Added index on order.user_id for the new query pattern
     ```
-    These anchors enable the L2→L3 drill-down: `memsearch expand` parses them to surface the transcript path, and the memory-recall skill can then use `memsearch transcript` or `transcript.py` to read the original conversation.
+    These anchors enable the L2→L3 drill-down: `memsearch expand` parses them to surface the transcript path, and the memory-recall skill can then use `memsearch transcript` to read the original conversation.
 
 6. **Re-index** -- runs `memsearch index` to ensure the new memory is immediately searchable (not just when the watcher picks up the file change).
 
@@ -221,7 +221,7 @@ This design choice has several important consequences:
 - **Portable.** Copy `.memsearch/memory/` to another machine, run `memsearch index`, and all your memories are searchable there.
 - **Auditable.** You can read, edit, or delete any memory entry with a text editor. Bad summary? Fix it. Sensitive information captured? Delete the line.
 - **Git-friendly.** Commit your memory files to version control for a complete project history. Diff, blame, and revert all work naturally.
-- **Cross-platform.** Memories written by the Claude Code plugin are searchable from [OpenClaw](../openclaw/index.md), [OpenCode](../opencode/index.md), or [Codex](../codex/index.md) -- just point them at the same `.memsearch/memory/` directory.
+- **Cross-platform.** Memories written by the Claude Code plugin are searchable from [Codex](../codex/index.md), [DeepSeek Harness](../dsh/index.md), [OpenClaw](../openclaw/index.md), or [OpenCode](../opencode/index.md) -- just point them at the same `.memsearch/memory/` directory.
 
 This contrasts with solutions that store memories in opaque databases (SQLite, ChromaDB, LanceDB). With memsearch, if you can open a text editor, you can read your memories.
 
@@ -246,7 +246,7 @@ plugins/claude-code/
 ├── skills/
 │   └── memory-recall/
 │       └── SKILL.md             # Memory retrieval skill (context: fork subagent)
-└── transcript.py                # Python JSONL parser for L3 drill-down
+└── transcript.py                # JSONL parser for Claude Code conversations (L3 deep drill via core `memsearch transcript`)
 ```
 
 | File | Purpose |
@@ -261,4 +261,4 @@ plugins/claude-code/
 | `session-end.sh` | Calls `stop_watch` to terminate background watcher and clean up. |
 | `derive-collection.sh` | Generates a deterministic per-project Milvus collection name from the project path (e.g., `ms_myproject_a1b2c3`). |
 | `SKILL.md` | The memory-recall skill definition. Uses `context: fork` to run in an isolated subagent. |
-| `transcript.py` | Python JSONL parser for L3 deep drill-down into original Claude Code conversations. Plugin-specific (not in core library). |
+| `transcript.py` | Python JSONL parser for Claude Code conversations. Plugin-specific (not in core library); exercised by `tests/test_transcript.py`. The `memory-recall` skill's L3 drill-down uses the core `memsearch transcript` CLI (which auto-detects the format) rather than calling this file directly. |

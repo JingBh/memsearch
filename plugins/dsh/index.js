@@ -34,11 +34,13 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   readdirSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url))
@@ -393,6 +395,318 @@ function runMaintenance(ctx, projectDir, memsearchDir) {
   child.unref()
 }
 
+// ---------------------------------------------------------------------------
+// Skill review panel (host side)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read every skill candidate from the `.memsearch/skill-candidates` directory.
+ *
+ * The candidates directory is the shared memory-to-skill output across all
+ * platform plugins (git-tracked, never auto-installed). Each subdirectory
+ * carries a `meta.json` plus a `SKILL.md` draft; a candidate whose status is
+ * `candidate` is pending human review, `installed` means it was already
+ * copied to an agent skill directory.
+ * @param memsearchDir - the project's `.memsearch` directory.
+ * @returns a stable array of candidate summaries (pending first, then name).
+ */
+function listSkillCandidates(memsearchDir) {
+  const candidatesDir = join(memsearchDir, 'skill-candidates')
+  let entries
+  try {
+    entries = readdirSync(candidatesDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const out = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const metaPath = join(candidatesDir, entry.name, 'meta.json')
+    let meta
+    try {
+      meta = JSON.parse(readFileSync(metaPath, 'utf-8'))
+    } catch {
+      continue // malformed or missing meta — not a candidate
+    }
+    out.push({
+      name: meta.name || entry.name,
+      status: meta.status || 'candidate',
+      description: typeof meta.description === 'string' ? meta.description : '',
+      occurrences: typeof meta.occurrences === 'number' ? meta.occurrences : 0,
+      sources: Array.isArray(meta.sources) ? meta.sources : [],
+      reason: typeof meta.reason === 'string' ? meta.reason : '',
+      installedPaths: Array.isArray(meta.installed_paths) ? meta.installed_paths : [],
+      updatedAt: meta.updated_at || meta.created_at || '',
+    })
+  }
+  out.sort((a, b) => {
+    const pa = a.status === 'candidate' ? 0 : 1
+    const pb = b.status === 'candidate' ? 0 : 1
+    return pa - pb || a.name.localeCompare(b.name)
+  })
+  return out
+}
+
+/**
+ * Resolve the install target directory for a distilled skill on DSH.
+ *
+ * Mirrors the other platform plugins: the destination is the first entry of
+ * `plugins.<agent>.memory_to_skill.paths` in memsearch config when the user
+ * set one (relative entries resolve against the project dir); otherwise DSH's
+ * default user-agents skill directory (`~/.agents/skills`), which the
+ * `skill-filesystem` provider watches and loads automatically.
+ */
+function resolveSkillInstallTarget(memsearchCmd, projectDir) {
+  const read = readMemsearchConfigValue(memsearchCmd, 'plugins.dsh.memory_to_skill.paths')
+  if (read.ok && read.value) {
+    try {
+      const paths = JSON.parse(read.value)
+      if (Array.isArray(paths) && paths.length > 0) {
+        const first = String(paths[0])
+        return join(first.startsWith('/') ? first : projectDir, first)
+      }
+    } catch { /* fall through to the DSH default */ }
+  }
+  return join(process.env.HOME || '', '.agents', 'skills')
+}
+
+/** Hard cap for read-file payloads (protects the browser from huge files). */
+const READ_FILE_MAX_BYTES = 256 * 1024
+
+/** File extensions the read-only preview may serve (text only). */
+const TEXT_FILE_EXTS = new Set(['md', 'markdown', 'json', 'txt', 'toml', 'yml', 'yaml', 'sh', 'py', 'js', 'ts'])
+
+/**
+ * Resolve `rel` inside `root` and reject anything that escapes the root
+ * (path traversal). Returns the absolute path or null.
+ */
+function safeJoinWithin(root, rel) {
+  const abs = resolve(root, rel || '.')
+  const rootResolved = resolve(root)
+  return pathIsWithin(rootResolved, abs) ? abs : null
+}
+
+/** Return true when `target` is `root` or one of its descendants. */
+function pathIsWithin(root, target) {
+  const rel = relative(root, target)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
+/**
+ * Resolve symlinks for an existing candidate and reject targets outside the
+ * real memory root. `undefined` means one of the paths does not exist.
+ */
+function realPathWithin(root, candidate) {
+  try {
+    const rootReal = realpathSync(root)
+    const candidateReal = realpathSync(candidate)
+    return pathIsWithin(rootReal, candidateReal) ? candidateReal : null
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Register the browser-facing skill-review JSON routes on the web server.
+ *
+ * The memsearch plugin mounts early (base bundle layer), before the DSH web
+ * server service is provided, so this must be called with the service already
+ * available — `apply` retries until it is (see the wait loop) and headless
+ * profiles never see it, so no routes are registered there.
+ */
+function registerSkillReviewRoutes(ctx, webServer, memsearchCmd) {
+  const readJsonBody = (req) => new Promise((resolve) => {
+    let body = ''
+    req.on('data', (chunk) => { body += chunk })
+    req.on('end', () => {
+      try { resolve(JSON.parse(body || '{}')) } catch { resolve({}) }
+    })
+  })
+  const sendJson = (res, status, payload) => {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify(payload))
+  }
+  // Project dir for a session id (its durable cwd), else the process cwd.
+  // A long-lived web surface serves many projects, so we never assume the
+  // boot dir is the only one (mirrors the capture path).
+  const projectDirForSession = (sessionId) => {
+    const agent = ctx.agents?.get?.(sessionId)
+    return projectDirFor(agent?.session)
+  }
+
+  webServer.register({
+    kind: 'exact',
+    path: '/memsearch-dsh/skill-candidates',
+    handler: (req, res) => {
+      if (req.method !== 'GET') return sendJson(res, 405, { error: 'method not allowed' })
+      const sessionId = new URL(req.url, 'http://localhost').searchParams.get('sessionId')
+      const projectDir = projectDirForSession(sessionId)
+      const memoryDir = memsearchDirFor(projectDir)
+      sendJson(res, 200, { candidates: listSkillCandidates(memoryDir) })
+    },
+  })
+
+  webServer.register({
+    kind: 'exact',
+    path: '/memsearch-dsh/skill-review',
+    handler: async (req, res) => {
+      if (req.method !== 'POST') return sendJson(res, 405, { error: 'method not allowed' })
+      const body = await readJsonBody(req)
+      const { sessionId, name, action } = body
+      if (!name || (action !== 'review' && action !== 'install')) {
+        return sendJson(res, 400, { error: 'name and action (review|install) are required' })
+      }
+      if (action === 'review') {
+        // Non-blocking: queue a user message into the live agent's inbox.
+        // The agent picks it up on the next turn (never interrupts a running
+        // turn, never asks the human via a blocking dialog).
+        const agent = ctx.agents?.get?.(sessionId)
+        if (!agent) {
+          return sendJson(res, 404, { error: `no live agent for session ${sessionId}` })
+        }
+        const text =
+          `[memsearch] Skill candidate "${name}" is ready for review.\n\n` +
+          `Read the candidate at .memsearch/skill-candidates/${name}/ (SKILL.md plus meta.json), ` +
+          `verify it against the cited memory journals, decide whether it is worth installing, ` +
+          `and report your recommendation to the user. Installation stays a manual step: ` +
+          `memsearch skills install ${name} --path <dir>.`
+        const message = await createMemoryMessage(ctx, text)
+        agent.inbox.append('next-turn', message)
+        return sendJson(res, 200, { ok: true, action, name, injected: true })
+      }
+      // install: background `memsearch skills install` to the resolved target.
+      // Detached + unref so the install survives the DSH process; the
+      // skill-filesystem watcher picks up the new SKILL.md automatically.
+      const projectDir = projectDirForSession(sessionId)
+      const target = resolveSkillInstallTarget(memsearchCmd, projectDir)
+      const command =
+        `${memsearchCmd} skills install '${shellEscape(name)}' ` +
+        `--path '${shellEscape(target)}'`
+      const child = execFile('bash', ['-c', command], {
+        cwd: projectDir,
+        timeout: 60000,
+        maxBuffer: 4 * 1024 * 1024,
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, MEMSEARCH_NO_WATCH: '1' },
+      }, (error) => {
+        if (error) ctx.logger.warn(`[memsearch] skill install failed: ${error.message}`)
+      })
+      child.unref()
+      return sendJson(res, 200, { ok: true, action, name, started: true, target })
+    },
+  })
+
+  webServer.register({
+    kind: 'exact',
+    path: '/memsearch-dsh/open-memsearch',
+    handler: async (req, res) => {
+      if (req.method !== 'POST') return sendJson(res, 405, { error: 'method not allowed' })
+      const body = await readJsonBody(req)
+      const { sessionId, scope } = body // scope: 'memsearch' (default) | 'candidates'
+      const projectDir = projectDirForSession(sessionId)
+      const memsearchDir = memsearchDirFor(projectDir)
+      const dir = scope === 'candidates' ? join(memsearchDir, 'skill-candidates') : memsearchDir
+      if (!existsSync(dir)) {
+        return sendJson(res, 404, { ok: false, error: `no such directory: ${dir}`, path: dir })
+      }
+      // Open the directory in the local file manager (xdg-open on Linux). The
+      // response is success regardless of whether a desktop is present; the
+      // path is returned so the client can show it if nothing opens.
+      const child = execFile('xdg-open', [dir], {
+        detached: true,
+        stdio: 'ignore',
+        timeout: 10000,
+      }, (error) => {
+        if (error) ctx.logger.warn(`[memsearch] open dir failed: ${error.message}`)
+      })
+      child.unref()
+      return sendJson(res, 200, { ok: true, path: dir })
+    },
+  })
+
+  webServer.register({
+    kind: 'exact',
+    path: '/memsearch-dsh/list-memsearch',
+    handler: async (req, res) => {
+      if (req.method !== 'GET') return sendJson(res, 405, { error: 'method not allowed' })
+      const sessionId = new URL(req.url, 'http://localhost').searchParams.get('sessionId')
+      const relPath = new URL(req.url, 'http://localhost').searchParams.get('path') || ''
+      const projectDir = projectDirForSession(sessionId)
+      const memsearchDir = memsearchDirFor(projectDir)
+      // Only ever list inside the project's .memsearch tree.
+      const abs = safeJoinWithin(memsearchDir, relPath)
+      if (abs === null) return sendJson(res, 400, { error: 'path outside .memsearch' })
+      const realAbs = realPathWithin(memsearchDir, abs)
+      if (realAbs === null) return sendJson(res, 400, { error: 'path outside .memsearch' })
+      if (realAbs === undefined) {
+        return sendJson(res, 404, { error: `no such directory: ${abs}`, path: abs })
+      }
+      let entries = []
+      try {
+        entries = readdirSync(realAbs, { withFileTypes: true })
+      } catch {
+        return sendJson(res, 404, { error: `no such directory: ${abs}`, path: abs })
+      }
+      const dirs = []
+      const files = []
+      for (const e of entries) {
+        if (e.name.startsWith('.')) continue // skip hidden (e.g. .git inside candidates)
+        if (e.isDirectory()) dirs.push(e.name)
+        else if (e.isFile()) files.push(e.name)
+      }
+      dirs.sort()
+      files.sort()
+      sendJson(res, 200, {
+        path: abs,
+        rel: relPath,
+        dirs,
+        files,
+      })
+    },
+  })
+
+  webServer.register({
+    kind: 'exact',
+    path: '/memsearch-dsh/read-file',
+    handler: async (req, res) => {
+      if (req.method !== 'GET') return sendJson(res, 405, { error: 'method not allowed' })
+      const sessionId = new URL(req.url, 'http://localhost').searchParams.get('sessionId')
+      const relPath = new URL(req.url, 'http://localhost').searchParams.get('path') || ''
+      const projectDir = projectDirForSession(sessionId)
+      const memsearchDir = memsearchDirFor(projectDir)
+      const abs = safeJoinWithin(memsearchDir, relPath)
+      if (abs === null) return sendJson(res, 400, { error: 'path outside .memsearch' })
+      const realAbs = realPathWithin(memsearchDir, abs)
+      if (realAbs === null) return sendJson(res, 400, { error: 'path outside .memsearch' })
+      if (realAbs === undefined) {
+        return sendJson(res, 404, { error: `no such file: ${abs}`, path: abs })
+      }
+      let stat
+      try {
+        stat = statSync(realAbs)
+      } catch {
+        return sendJson(res, 404, { error: `no such file: ${abs}`, path: abs })
+      }
+      if (!stat.isFile()) return sendJson(res, 400, { error: 'not a file' })
+      if (stat.size > READ_FILE_MAX_BYTES) {
+        return sendJson(res, 413, { error: `file too large (${stat.size} bytes, max ${READ_FILE_MAX_BYTES})` })
+      }
+      const ext = extname(realAbs).slice(1).toLowerCase()
+      if (!TEXT_FILE_EXTS.has(ext)) {
+        return sendJson(res, 415, { error: `unsupported file type: .${ext}` })
+      }
+      let content
+      try {
+        content = readFileSync(realAbs, 'utf-8')
+      } catch {
+        return sendJson(res, 500, { error: 'read failed' })
+      }
+      sendJson(res, 200, { path: abs, rel: relPath, name: basename(abs), ext, content })
+    },
+  })
+}
+
 /** Compact human-readable memory block injected into the request. */
 function renderMemoryBlock(chunks) {
   const lines = chunks.map((chunk, index) => {
@@ -692,6 +1006,70 @@ function registerMemoryRecallSkill(ctx, opts, memsearchCmd, collection, projectD
 }
 
 // ---------------------------------------------------------------------------
+// Memory-config + memory-to-skill skills (platform-independent, synced from
+// plugins/_shared/skills/ by scripts/sync-skills.sh)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read and strip a runtime-registered skill body from plugins/dsh/skills/.
+ * Returns the body string, or null if the file is missing/unreadable.
+ * The leading YAML frontmatter and the sync-script HTML comment are removed;
+ * metadata (name/description/whenToUse) is supplied in the register() call.
+ */
+function readRuntimeSkillBody(ctx, skillName) {
+  const skillPath = join(PLUGIN_DIR, 'skills', skillName, 'SKILL.md')
+  let content
+  try {
+    content = readFileSync(skillPath, 'utf-8')
+  } catch (error) {
+    ctx.logger.warn(`[memsearch] could not read ${skillName} skill: ${error.message}`)
+    return null
+  }
+  return content
+    .replace(/^﻿?---[\s\S]*?---\s*/u, '') // strip optional YAML frontmatter
+    .replace(/^<!--[\s\S]*?-->\s*/u, '') // strip the human-facing metadata comment
+    .trim()
+}
+
+function registerMemoryConfigSkill(ctx) {
+  const content = readRuntimeSkillBody(ctx, 'memory-config')
+  if (content === null) return
+  ctx.skills.register({
+    name: 'memory-config',
+    description:
+      'Diagnose and configure MemSearch memory behavior. Use when the user asks about ' +
+      'MemSearch configuration, plugin summarization, PROJECT.md/USER.md maintenance, ' +
+      'memory directories, index health, provider routing, prompt files, or migration/compatibility questions.',
+    whenToUse:
+      'The user asks to check, change, or troubleshoot MemSearch memory settings on ' +
+      'DeepSeek Harness.',
+    content,
+    source: 'runtime',
+    invocation: { modelInvocable: true, userInvocable: true },
+    resourceBase: { kind: 'directory', path: join(PLUGIN_DIR, 'skills', 'memory-config') },
+  })
+}
+
+function registerMemoryToSkillSkill(ctx) {
+  const content = readRuntimeSkillBody(ctx, 'memory-to-skill')
+  if (content === null) return
+  ctx.skills.register({
+    name: 'memory-to-skill',
+    description:
+      'Turn workflows from your MemSearch memory into reusable skills. Use when the user ' +
+      'asks to make/create/extract/distill a skill from what they just did or from past work, ' +
+      'review skill candidates, install a distilled skill, or "turn this into a skill".',
+    whenToUse:
+      'The user wants to capture a recurring workflow as a skill, review or install distilled ' +
+      'skill candidates from .memsearch/skill-candidates/, or enable/tune background distillation.',
+    content,
+    source: 'runtime',
+    invocation: { modelInvocable: true, userInvocable: true },
+    resourceBase: { kind: 'directory', path: join(PLUGIN_DIR, 'skills', 'memory-to-skill') },
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Plugin entry
 // ---------------------------------------------------------------------------
 
@@ -759,6 +1137,10 @@ export function apply(ctx, config = {}) {
 
   // --- Recall skill (always available) ---
   registerMemoryRecallSkill(ctx, opts, memsearchCmd, bootCollection, bootProjectDir)
+
+  // --- Config + distillation skills (always available) ---
+  registerMemoryConfigSkill(ctx)
+  registerMemoryToSkillSkill(ctx)
 
   // --- Pre-step injection: relevant memory only, zero context otherwise ---
   ctx.on(
@@ -884,6 +1266,28 @@ export function apply(ctx, config = {}) {
     }
   })
 
+  // --- Skill review panel: browser-facing JSON API (web only) ---
+  // The memsearch plugin mounts in the base bundle layer, before the DSH web
+  // server service exists. Retry until the service appears (web profile) or
+  // give up silently (headless / tui profiles never provide it). The retry
+  // timer is unref'd so it never keeps the process alive, and the routes are
+  // registered exactly once.
+  let skillReviewAttempted = false
+  const tryRegisterSkillReview = () => {
+    if (skillReviewAttempted) return
+    const webServer = typeof ctx.get === 'function' ? ctx.get('webServer') : undefined
+    if (webServer === undefined) return // not available yet; retry later
+    skillReviewAttempted = true
+    try {
+      registerSkillReviewRoutes(ctx, webServer, memsearchCmd)
+    } catch (error) {
+      ctx.logger.warn(`[memsearch] skill-review route registration failed: ${error.message}`)
+    }
+  }
+  tryRegisterSkillReview()
+  const skillReviewTimer = setInterval(tryRegisterSkillReview, 1000)
+  skillReviewTimer.unref?.()
+
   // Warm the index for this project once at startup (fire-and-forget).
   const bootMemoryDir = memoryDirFor(bootProjectDir)
   if (bootCollection && hasMemoryFiles(bootMemoryDir)) {
@@ -924,3 +1328,12 @@ export { runMaintenance }
 
 /** Memory dir for a project (MEMSEARCH_DIR env override, else <project>/.memsearch). */
 export { memsearchDirFor }
+
+/** Read skill candidates from the `.memsearch/skill-candidates` directory. */
+export { listSkillCandidates }
+
+/** Register the skill-review JSON routes on a web server service. */
+export { registerSkillReviewRoutes }
+
+/** Resolve the distilled-skill install target (paths config, else ~/.agents/skills). */
+export { resolveSkillInstallTarget }

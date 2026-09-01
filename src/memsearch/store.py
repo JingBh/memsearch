@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
-import sys
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -72,15 +71,6 @@ class MilvusStore:
         from pymilvus import MilvusClient
 
         is_local = not uri.startswith(("http", "tcp"))
-        if is_local and sys.platform == "win32":
-            raise RuntimeError(
-                "milvus-lite does not support Windows (no wheels on PyPI).\n"
-                "Use a remote Milvus server instead:\n"
-                "  docker run -d -p 19530:19530 milvusdb/milvus:latest standalone\n"
-                "  MemSearch(milvus_uri='http://localhost:19530')\n"
-                "Or run memsearch inside WSL2: "
-                "https://learn.microsoft.com/en-us/windows/wsl/install"
-            )
         resolved = str(Path(uri).expanduser()) if is_local else uri
         if is_local:
             Path(resolved).parent.mkdir(parents=True, exist_ok=True)
@@ -111,6 +101,8 @@ class MilvusStore:
 
         from pymilvus import DataType, Function, FunctionType
 
+        # Description is optional backend metadata. Indexing and search never
+        # depend on it because some Milvus Lite versions do not return it.
         schema = self._client.create_schema(
             enable_dynamic_field=True,
             description=self._description,
