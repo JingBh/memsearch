@@ -31,6 +31,8 @@ memsearch config set plugins.zcode.summarize.model gpt-5-mini
 
 Without a provider, each turn is stored as a plain `User asked / ZCode` extract instead of an LLM summary. The same providers drive the optional maintenance tasks (`plugins.zcode.project_review`, `plugins.zcode.user_profile`, `plugins.zcode.memory_to_skill`).
 
+ZCode launches hooks from the desktop app, so they do not inherit your shell exports. If `config.toml` uses `env:VAR` references for API keys, put those variables in `~/.memsearch/.env` (see [Configuration](../../home/configuration.md#secrets-via-env-references)); memsearch reads it whenever a referenced variable is missing from the environment.
+
 The plugin defaults to ONNX embedding (no API key). Other configuration uses the standard memsearch config system:
 
 ```bash

@@ -25,6 +25,10 @@ import tomli_w
 
 GLOBAL_CONFIG_PATH = Path("~/.memsearch/config.toml").expanduser()
 PROJECT_CONFIG_PATH = Path(".memsearch.toml")
+# Fallback source for ``env:VAR`` references. Desktop-launched agents (ZCode,
+# GUI-started Claude Code) run hooks without the user's shell environment, so
+# secrets referenced from config can live here instead of a global login env.
+ENV_FILE_PATH = Path("~/.memsearch/.env").expanduser()
 
 # Fields that should be parsed as int when set via CLI strings
 _INT_FIELDS = {"max_chunk_size", "overlap_lines", "debounce_ms", "batch_size", "min_interval_hours", "min_occurrences"}
@@ -270,20 +274,65 @@ class ConfigEnvVarError(KeyError):
     """
 
 
+def env_file_path() -> Path:
+    """Return the dotenv fallback file; ``MEMSEARCH_ENV_FILE`` overrides the default."""
+    override = os.environ.get("MEMSEARCH_ENV_FILE")
+    return Path(override).expanduser() if override else ENV_FILE_PATH
+
+
+def load_env_file(path: Path | None = None) -> dict[str, str]:
+    """Parse a dotenv-style file: ``KEY=VALUE`` lines, optional ``export``, quotes, ``#`` comments.
+
+    Missing or unreadable files yield an empty mapping. The file is small and
+    read only when an ``env:`` reference is absent from the process environment,
+    so no caching is needed.
+    """
+    target = path or env_file_path()
+    try:
+        lines = target.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+
+    values: dict[str, str] = {}
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].lstrip()
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if not sep or not key.isidentifier():
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        else:
+            value = value.split(" #", 1)[0].rstrip()
+        values[key] = value
+    return values
+
+
 def resolve_env_ref(value: str) -> str:
     """Resolve an ``env:VAR_NAME`` reference to its environment variable value.
 
     If *value* starts with ``env:``, the remainder is used as an environment
-    variable name.  Returns the variable's value, or raises
-    :class:`ConfigEnvVarError` if the variable is not set.  Non-prefixed
-    strings are returned unchanged.
+    variable name.  The process environment wins; a variable missing there is
+    looked up in the dotenv fallback file (see :func:`env_file_path`).  Returns
+    the value, or raises :class:`ConfigEnvVarError` if neither source defines
+    it.  Non-prefixed strings are returned unchanged.
     """
     if not isinstance(value, str) or not value.startswith(_ENV_PREFIX):
         return value
     var_name = value[len(_ENV_PREFIX) :]
     env_val = os.environ.get(var_name)
     if env_val is None:
-        raise ConfigEnvVarError(f"Environment variable {var_name!r} referenced in config (via {value!r}) is not set")
+        env_val = load_env_file().get(var_name)
+    if env_val is None:
+        raise ConfigEnvVarError(
+            f"Environment variable {var_name!r} referenced in config (via {value!r}) is not set "
+            f"in the environment or {env_file_path()}"
+        )
     return env_val
 
 

@@ -35,6 +35,23 @@ before it is merged. It can only set low-risk local indexing keys:
 endpoints, API keys, prompt files, and `plugins.*` automation in global config
 or pass them as explicit CLI flags.
 
+## Secrets via `env:` References
+
+Any string value can be written as `env:VAR_NAME` to read it from an
+environment variable at resolve time, keeping secrets out of `config.toml`:
+
+```bash
+memsearch config set embedding.api_key env:MEMSEARCH_EMBEDDING_API_KEY
+```
+
+The process environment is checked first. A variable missing there is looked up
+in `~/.memsearch/.env` (dotenv format: `KEY=VALUE`, optional `export`, quotes,
+`#` comments). Set `MEMSEARCH_ENV_FILE` to use a different file. This matters
+for agents launched from the desktop rather than a terminal (ZCode, GUI-started
+Claude Code): their hooks do not inherit your shell exports, so put the secrets
+in `~/.memsearch/.env` instead of a global login environment or a wrapper
+script.
+
 ## Quick Setup
 
 ```bash

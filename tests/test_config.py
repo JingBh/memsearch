@@ -561,6 +561,52 @@ def test_resolve_env_ref_missing_var():
         resolve_env_ref("env:NONEXISTENT_MEMSEARCH_VAR")
 
 
+def test_resolve_env_ref_falls_back_to_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Variables missing from the process environment resolve from ~/.memsearch/.env."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# secrets for hooks launched without a shell\n"
+        "\n"
+        'export ENV_FILE_QUOTED_KEY="quoted value"\n'
+        "ENV_FILE_PLAIN_KEY=plain-value # trailing comment\n"
+        "ENV_FILE_HASH_KEY='abc#123'\n"
+        "not a valid line\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("memsearch.config.ENV_FILE_PATH", env_file)
+    monkeypatch.delenv("MEMSEARCH_ENV_FILE", raising=False)
+    for name in ("ENV_FILE_QUOTED_KEY", "ENV_FILE_PLAIN_KEY", "ENV_FILE_HASH_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert resolve_env_ref("env:ENV_FILE_QUOTED_KEY") == "quoted value"
+    assert resolve_env_ref("env:ENV_FILE_PLAIN_KEY") == "plain-value"
+    assert resolve_env_ref("env:ENV_FILE_HASH_KEY") == "abc#123"
+
+
+def test_resolve_env_ref_prefers_process_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A variable set in the environment wins over the env file."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("SHADOWED_KEY=from-file\n", encoding="utf-8")
+    monkeypatch.setattr("memsearch.config.ENV_FILE_PATH", env_file)
+    monkeypatch.setenv("SHADOWED_KEY", "from-env")
+
+    assert resolve_env_ref("env:SHADOWED_KEY") == "from-env"
+
+
+def test_resolve_env_ref_env_file_override_and_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """MEMSEARCH_ENV_FILE selects the file; a name absent from both sources still raises."""
+    env_file = tmp_path / "custom.env"
+    env_file.write_text("OVERRIDE_FILE_KEY=custom\n", encoding="utf-8")
+    monkeypatch.setattr("memsearch.config.ENV_FILE_PATH", tmp_path / "unused.env")
+    monkeypatch.setenv("MEMSEARCH_ENV_FILE", str(env_file))
+    monkeypatch.delenv("OVERRIDE_FILE_KEY", raising=False)
+    monkeypatch.delenv("STILL_MISSING_KEY", raising=False)
+
+    assert resolve_env_ref("env:OVERRIDE_FILE_KEY") == "custom"
+    with pytest.raises(KeyError, match=r"custom\.env"):
+        resolve_env_ref("env:STILL_MISSING_KEY")
+
+
 def test_resolve_env_refs_in_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """resolve_config should resolve env: references in TOML values."""
     monkeypatch.setenv("TEST_API_KEY", "sk-from-env")
