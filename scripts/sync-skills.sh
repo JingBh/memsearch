@@ -19,6 +19,7 @@
 #   - opencode:    allowed-tools: Bash
 #   - openclaw:    metadata.openclaw.emoji
 #   - codex:       (standard name/description only)
+#   - zcode:       (standard name/description only)
 #   - dsh:         runtime-registered; body keeps {{PLACEHOLDER}} tokens and no
 #                  frontmatter (index.js injects name/description at register time)
 set -euo pipefail
@@ -28,7 +29,7 @@ SHARED_DIR="$REPO_ROOT/plugins/_shared/skills"
 
 SKILLS=(memory-config memory-to-skill)
 # Platforms that ship a standard filesystem skill (SKILL.md + frontmatter).
-PLATFORMS=(claude-code codex openclaw opencode)
+PLATFORMS=(claude-code codex openclaw opencode zcode)
 
 # Frontmatter lines to insert after the shared `description:` line, per platform.
 gen_frontmatter() {

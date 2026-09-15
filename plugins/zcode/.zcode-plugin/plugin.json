@@ -1,0 +1,11 @@
+{
+  "name": "memsearch-zcode",
+  "version": "0.1.0",
+  "description": "Automatic semantic memory for ZCode — remembers what you worked on across sessions",
+  "author": {
+    "name": "Zilliz"
+  },
+  "license": "MIT",
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json"
+}

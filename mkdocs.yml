@@ -69,6 +69,11 @@ nav:
     - Installation: platforms/opencode/installation.md
     - How It Works: platforms/opencode/how-it-works.md
     - Memory Tools: platforms/opencode/memory-tools.md
+  - ZCode Plugin:
+    - Overview: platforms/zcode/index.md
+    - Installation: platforms/zcode/installation.md
+    - How It Works: platforms/zcode/how-it-works.md
+    - Memory Recall: platforms/zcode/memory-recall.md
   - For Agent Developers:
     - CLI Reference: cli.md
     - Python API: python-api.md

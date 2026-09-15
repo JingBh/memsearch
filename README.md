@@ -15,6 +15,7 @@
   <a href="https://zilliztech.github.io/memsearch/platforms/dsh/"><img src="https://img.shields.io/badge/DeepSeek_Harness-plugin-4d6bfe?style=flat-square" alt="DeepSeek Harness"></a>
   <a href="https://zilliztech.github.io/memsearch/platforms/openclaw/"><img src="https://img.shields.io/badge/OpenClaw-plugin-4a9eff?style=flat-square" alt="OpenClaw"></a>
   <a href="https://zilliztech.github.io/memsearch/platforms/opencode/"><img src="https://img.shields.io/badge/OpenCode-plugin-22c55e?style=flat-square" alt="OpenCode"></a>
+  <a href="https://zilliztech.github.io/memsearch/platforms/zcode/"><img src="https://img.shields.io/badge/ZCode-plugin-2563eb?style=flat-square" alt="ZCode"></a>
   <a href="https://pypi.org/project/memsearch/"><img src="https://img.shields.io/badge/python-%3E%3D3.10-blue?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
   <a href="https://github.com/zilliztech/memsearch/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zilliztech/memsearch?style=flat-square" alt="License"></a>
   <a href="https://github.com/zilliztech/memsearch/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/zilliztech/memsearch/test.yml?branch=main&style=flat-square" alt="Tests"></a>
@@ -38,7 +39,7 @@
 
 ### Why memsearch?
 
-- 🌐 **All Platforms, One Memory** — memories flow across [Claude Code](plugins/claude-code/README.md), [Codex](plugins/codex/README.md), [DeepSeek Harness](plugins/dsh/README.md), [OpenClaw](plugins/openclaw/README.md), and [OpenCode](plugins/opencode/README.md). A conversation in one agent becomes searchable context in all others — no extra setup
+- 🌐 **All Platforms, One Memory** — memories flow across [Claude Code](plugins/claude-code/README.md), [Codex](plugins/codex/README.md), [DeepSeek Harness](plugins/dsh/README.md), [OpenClaw](plugins/openclaw/README.md), [OpenCode](plugins/opencode/README.md), and [ZCode](plugins/zcode/README.md). A conversation in one agent becomes searchable context in all others — no extra setup
 - 👥 **For Agent Users**, install a plugin and get persistent memory with zero effort; **for Agent Developers**, use the full [CLI](https://zilliztech.github.io/memsearch/cli/) and [Python API](https://zilliztech.github.io/memsearch/python-api/) to build memory and harness engineering into your own agents
 - 📄 **Markdown is the source of truth** — inspired by [OpenClaw](https://github.com/openclaw/openclaw). Your memories are just `.md` files — human-readable, editable, version-controllable. Milvus is a "shadow index": a derived, rebuildable cache
 - 🔍 **Progressive retrieval, hybrid search, smart dedup, live sync** — 3-layer recall (search → expand → transcript); dense vector + BM25 sparse + RRF reranking; SHA-256 content hashing skips unchanged content; file watcher auto-indexes in real time
@@ -203,6 +204,30 @@ We discussed the authentication flow before, what was the approach?
 ```
 
 > 📖 [OpenCode Plugin docs](https://zilliztech.github.io/memsearch/platforms/opencode/)
+
+</details>
+
+<details>
+<summary><h3>For ZCode Users</h3></summary>
+
+In **Settings → Plugin Management → Discover**, add the `zilliztech/memsearch` repository as a marketplace and install **memsearch-zcode**. Then route summaries through a memsearch-managed provider (ZCode has no headless CLI):
+
+```bash
+memsearch config set llm.providers.openai.type openai
+memsearch config set llm.providers.openai.api_key env:OPENAI_API_KEY
+memsearch config set plugins.zcode.summarize.provider openai
+```
+
+Start a new session and chat as usual. A detached worker captures each finished turn from ZCode's session store.
+
+**Recall memories** — two ways to trigger:
+
+```
+$memory-recall what did we discuss about the hook timeout units?
+```
+Or just ask naturally — ZCode invokes the `memsearch-zcode:memory-recall` skill when it senses the question needs history.
+
+> 📖 [ZCode Plugin docs](https://zilliztech.github.io/memsearch/platforms/zcode/)
 
 </details>
 
@@ -675,7 +700,7 @@ Collection priority: integration-derived default → `~/.memsearch/config.toml` 
 ## 🔗 Links
 
 - 📖 [Documentation](https://zilliztech.github.io/memsearch/) — full guides, API reference, and architecture details
-- 🔌 [Platform Plugins](https://zilliztech.github.io/memsearch/platforms/) — Claude Code, Codex, DeepSeek Harness, OpenClaw, OpenCode
+- 🔌 [Platform Plugins](https://zilliztech.github.io/memsearch/platforms/) — Claude Code, Codex, DeepSeek Harness, OpenClaw, OpenCode, ZCode
 - 💡 [Design Philosophy](https://zilliztech.github.io/memsearch/design-philosophy/) — why markdown, why Milvus, competitor comparison
 - 🦞 [OpenClaw](https://github.com/openclaw/openclaw) — the memory architecture that inspired memsearch
 - 🗄️ [Milvus](https://milvus.io/) | [Zilliz Cloud](https://cloud.zilliz.com/signup?utm_source=github&utm_medium=referral&utm_campaign=memsearch-readme) — the vector database powering memsearch

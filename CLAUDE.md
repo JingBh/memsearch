@@ -110,7 +110,7 @@ When modifying hooks/skills, keep in mind:
 
 ## Versioning & Release
 
-**Six release components** — bump only the versioned components that changed:
+**Seven release components** — bump only the versioned components that changed:
 
 | Component | Version file | Publish channel |
 |-----------|-------------|-----------------|
@@ -120,6 +120,7 @@ When modifying hooks/skills, keep in mind:
 | **DeepSeek Harness plugin** | `plugins/dsh/package.json` | npm (`@zilliz/memsearch-dsh`, trusted publishing via `release-dsh.yml`) |
 | **OpenClaw plugin** | `plugins/openclaw/package.json` | ClawHub (`clawhub package publish`) |
 | **OpenCode plugin** | `plugins/opencode/package.json` | npm (`@zilliz/memsearch-opencode`, trusted publishing via `release.yml`) |
+| **ZCode plugin** | `plugins/zcode/.zcode-plugin/plugin.json` | Marketplace (`.claude-plugin/marketplace.json`, entry `memsearch-zcode`) |
 
 Use the repository-local `$release-memsearch` skill for release operations. See
 `CLAUDE.local.md` for machine-specific development and published-artifact E2E rules.
