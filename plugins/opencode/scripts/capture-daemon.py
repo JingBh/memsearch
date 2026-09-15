@@ -40,6 +40,10 @@ from opencode_turns import (
 
 _ANCHOR_RE = re.compile(r"<!-- session:([^ ]+) turn:([^ ]+) db:")
 _TAIL_TURN_QUIET_PERIOD_MS = int(os.environ.get("MEMSEARCH_OPENCODE_TAIL_QUIET_MS", "300000"))
+_SUMMARY_UNAVAILABLE = (
+    "- Memory summary unavailable: summarizer failed or returned no usable output; "
+    "transcript content was omitted. Use the transcript anchor for progressive disclosure."
+)
 
 
 class TailTurnObservation:
@@ -402,15 +406,15 @@ def summarize_with_llm(
     project_dir: str | os.PathLike[str] | None = None,
 ) -> str | None:
     """Summarize using configured provider routing."""
-    if not get_plugin_summarize_enabled(memsearch_cmd):
-        return None
+    try:
+        if not get_plugin_summarize_enabled(memsearch_cmd):
+            return None
 
-    system_prompt = _load_summarize_prompt("OpenCode", memsearch_cmd)
-    full_prompt = f"{system_prompt}\n\nTranscript:\n{turn_text}"
+        system_prompt = _load_summarize_prompt("OpenCode", memsearch_cmd)
+        full_prompt = f"{system_prompt}\n\nTranscript:\n{turn_text}"
 
-    summarize_provider = get_plugin_summarize_provider(memsearch_cmd)
-    if summarize_provider and summarize_provider != "native" and memsearch_cmd:
-        try:
+        summarize_provider = get_plugin_summarize_provider(memsearch_cmd)
+        if summarize_provider and summarize_provider != "native" and memsearch_cmd:
             result = subprocess.run(
                 [*split_memsearch_cmd(memsearch_cmd), "summarize", "--plugin", "opencode", "--agent-name", "OpenCode"],
                 input=turn_text,
@@ -421,6 +425,8 @@ def summarize_with_llm(
                 timeout=30,
                 env={**os.environ, "MEMSEARCH_NO_WATCH": "1"},
             )
+            if result.returncode != 0:
+                return None
             output = result.stdout.strip()
             lines = output.split("\n")
             bullets = [line for line in lines if line.strip().startswith("- ")]
@@ -428,20 +434,17 @@ def summarize_with_llm(
                 return "\n".join(bullets)
             if output:
                 return output
-        except Exception:
-            pass
-        return None
 
-    # Native path: summarize using opencode run in isolated env (no plugins -> no recursion).
-    isolated_dir = ensure_isolated_config(project_dir)
+            return None
 
-    summarize_model = get_plugin_summarize_model(memsearch_cmd) or small_model
-    cmd = ["opencode", "run"]
-    if summarize_model:
-        cmd += ["-m", summarize_model]
-    cmd.append(full_prompt)
+        # Native path: summarize using opencode run in isolated env (no plugins -> no recursion).
+        isolated_dir = ensure_isolated_config(project_dir)
+        summarize_model = get_plugin_summarize_model(memsearch_cmd) or small_model
+        cmd = ["opencode", "run"]
+        if summarize_model:
+            cmd += ["-m", summarize_model]
+        cmd.append(full_prompt)
 
-    try:
         result = subprocess.run(
             cmd,
             env={
@@ -458,6 +461,8 @@ def summarize_with_llm(
             text=True,
             timeout=30,
         )
+        if result.returncode != 0:
+            return None
         output = result.stdout.strip()
         lines = output.split("\n")
         bullets = [line for line in lines if line.strip().startswith("- ")]
@@ -767,7 +772,7 @@ def capture_session_turns(
             summary = summarize_with_llm(turn_text, small_model, memsearch_cmd, project_dir)
             write_capture(
                 memory_dir,
-                summary if summary else turn_text,
+                summary if summary else _SUMMARY_UNAVAILABLE,
                 session_id,
                 turn.turn_id,
                 db_path,
@@ -841,7 +846,10 @@ def main() -> None:
                 )
 
             if any_new:
-                os.system(f"{args.memsearch_cmd} index '{memory_dir}' --collection {args.collection_name} &")
+                os.system(
+                    f"{args.memsearch_cmd} index '{memory_dir}' "
+                    f"--default-collection {args.collection_name} &"
+                )
                 wake_maintenance(args.project_dir)
         except Exception:
             pass

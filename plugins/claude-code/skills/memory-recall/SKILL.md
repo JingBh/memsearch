@@ -1,6 +1,6 @@
 ---
 name: memory-recall
-description: "Search and recall relevant memories from past sessions via memsearch. Use when the user's question could benefit from historical context, past decisions, debugging notes, previous conversations, or project knowledge -- especially questions like 'what did I decide about X', 'why did we do Y', or 'have I seen this before'. Also use when you see `[memsearch] Memory available` hints injected via SessionStart or UserPromptSubmit. Typical flow: search for 3-5 chunks, expand the most relevant, optionally deep-drill into original transcripts via the anchor format. Skip when the question is purely about current code state (use Read/Grep), ephemeral (today's task only), or the user has explicitly asked to ignore memory."
+description: "Search and recall relevant memories from past sessions via memsearch. Use when the user's question could benefit from historical context, past decisions, debugging notes, previous conversations, or project knowledge -- especially questions like 'what did I decide about X', 'why did we do Y', or 'have I seen this before'. Also use when you see `[memsearch] Recall available if needed` capability hints injected via SessionStart or UserPromptSubmit. Typical flow: search for 3-5 chunks, expand the most relevant, optionally deep-drill into original transcripts via the anchor format. Skip when the question is purely about current code state (use Read/Grep), ephemeral (today's task only), or the user has explicitly asked to ignore memory."
 context: fork
 allowed-tools: Bash
 ---
@@ -17,13 +17,13 @@ Search for memories relevant to: $ARGUMENTS
 
 ## Steps
 
-1. **Search**: Run `memsearch search "<query>" --top-k 5 --json-output --collection <collection name above>` to find relevant chunks.
+1. **Search**: Run `memsearch search "<query>" --top-k 5 --json-output --default-collection <collection name above>` to find relevant chunks.
    - If `memsearch` is not found, try `uvx memsearch` instead.
    - Choose a search query that captures the core intent of the user's question.
 
 2. **Evaluate**: Look at the search results. Skip chunks that are clearly irrelevant or too generic.
 
-3. **Expand**: For each relevant result, run `memsearch expand <chunk_hash> --collection <collection name above>` to get the full markdown section with surrounding context.
+3. **Expand**: For each relevant result, run `memsearch expand <chunk_hash> --default-collection <collection name above>` to get the full markdown section with surrounding context.
 
 4. **Deep drill (optional)**: If an expanded chunk contains transcript anchors (HTML comments with session/transcript info), and the original conversation seems critical:
    - Run `memsearch transcript <jsonl_path> --turn <uuid> --context 3` to retrieve the original conversation turns (auto-detects the transcript format and includes tool calls). If `memsearch` is not found, use `uvx memsearch` instead.

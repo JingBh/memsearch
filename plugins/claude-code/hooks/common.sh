@@ -26,14 +26,21 @@ for p in "$HOME/.local/bin" "$HOME/.cargo/bin" "$HOME/bin" "/usr/local/bin"; do
   [[ -d "$p" ]] && [[ ":$PATH:" != *":$p:"* ]] && export PATH="$p:$PATH"
 done
 
-# Memory directory and memsearch state directory are project-scoped.
-# Prefer git root to avoid .memsearch scattered in subdirectories when
-# CLAUDE_PROJECT_DIR is unset (child claude -p) or points to a subdir.
-_GIT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "")"
+# Memory directory and memsearch state directory are project-scoped. A valid
+# host-provided project directory must win over the hook process cwd, which may
+# belong to an unrelated repository. Resolve a subdirectory to its own git root.
+if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "$CLAUDE_PROJECT_DIR" ]; then
+  _PROJECT_DIR="$CLAUDE_PROJECT_DIR"
+else
+  _PROJECT_DIR="$(pwd)"
+fi
+case "$_PROJECT_DIR" in
+  /*) ;;
+  *) _PROJECT_DIR="$(pwd)/$_PROJECT_DIR" ;;
+esac
+_GIT_ROOT="$(git -C "$_PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "")"
 if [ -n "$_GIT_ROOT" ]; then
   _PROJECT_DIR="$_GIT_ROOT"
-else
-  _PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
 fi
 # When MEMSEARCH_DIR is explicitly set, use global scope (shared dir + collection).
 # Otherwise memory lives in a central per-project store keyed by the collection
@@ -48,19 +55,62 @@ else
 fi
 MEMORY_DIR="$MEMSEARCH_DIR/memory"
 
-# Find memsearch binary: prefer PATH, fallback to uvx
+# Find memsearch binary: prefer PATH, fallback to uvx. Keep argv boundaries so
+# the uvx fallback and scoped execution do not depend on shell word splitting.
 _detect_memsearch() {
-  MEMSEARCH_CMD=""
+  MEMSEARCH_CMD=()
   if command -v memsearch &>/dev/null; then
-    MEMSEARCH_CMD="memsearch"
+    MEMSEARCH_CMD=(memsearch)
   elif command -v uvx &>/dev/null; then
-    MEMSEARCH_CMD="uvx --from memsearch[onnx] memsearch"
+    MEMSEARCH_CMD=(uvx --from "memsearch[onnx]" memsearch)
   fi
 }
 _detect_memsearch
 
 # Short command prefix for injected instructions (falls back to "memsearch" even if unavailable)
-MEMSEARCH_CMD_PREFIX="${MEMSEARCH_CMD:-memsearch}"
+MEMSEARCH_CMD_PREFIX="${MEMSEARCH_CMD[*]:-memsearch}"
+
+memsearch_available() {
+  [ "${#MEMSEARCH_CMD[@]}" -gt 0 ]
+}
+
+_run_in_project() {
+  (cd "$_PROJECT_DIR" && "$@")
+}
+
+project_path() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '%s/%s\n' "$_PROJECT_DIR" "$1" ;;
+  esac
+}
+
+_memsearch() {
+  memsearch_available || return 127
+  _run_in_project "${MEMSEARCH_CMD[@]}" "$@"
+}
+
+_MEMSEARCH_DEFAULT_COLLECTION_SUPPORT=""
+
+memsearch_supports_default_collection() {
+  memsearch_available || return 1
+  if [ -z "$_MEMSEARCH_DEFAULT_COLLECTION_SUPPORT" ]; then
+    if _memsearch config get milvus.collection --default-collection "$COLLECTION_NAME" >/dev/null 2>&1; then
+      _MEMSEARCH_DEFAULT_COLLECTION_SUPPORT="true"
+    else
+      _MEMSEARCH_DEFAULT_COLLECTION_SUPPORT="false"
+    fi
+  fi
+  [ "$_MEMSEARCH_DEFAULT_COLLECTION_SUPPORT" = "true" ]
+}
+
+require_default_collection_support() {
+  if memsearch_supports_default_collection; then
+    return 0
+  fi
+  printf '%s\n' '[memsearch] ERROR: installed memsearch CLI is incompatible with this plugin; --default-collection support is required.' >&2
+  return 2
+}
 
 # --- JSON helpers (jq preferred, python3 fallback) ---
 
@@ -156,12 +206,82 @@ _installed_version_from_dist_info() {
   done
 }
 
-# Latest memsearch version on PyPI, cached for 24h. Keeps the update hint
-# current without making every session start wait on a network round trip: an
-# unreachable PyPI otherwise costs the full curl timeout on every start.
-# Prints nothing when the lookup fails.
+# Parse the supported suffixes into their public-version order. Local labels
+# are handled separately because a public index must not advertise the same
+# public version as an upgrade over an installed local build.
+_version_suffix_key() {
+  local suffix="${1#.}" number
+  case "$suffix" in
+    "") _VERSION_SUFFIX_RANK=4; _VERSION_SUFFIX_NUMBER=0; return 0 ;;
+    dev*) _VERSION_SUFFIX_RANK=0; number=${suffix#dev} ;;
+    a*) _VERSION_SUFFIX_RANK=1; number=${suffix#a} ;;
+    b*) _VERSION_SUFFIX_RANK=2; number=${suffix#b} ;;
+    rc*) _VERSION_SUFFIX_RANK=3; number=${suffix#rc} ;;
+    post*) _VERSION_SUFFIX_RANK=5; number=${suffix#post} ;;
+    *) return 1 ;;
+  esac
+  case "$number" in ""|*[!0-9]*) return 1 ;; esac
+  [ "${#number}" -le 9 ] || return 1
+  _VERSION_SUFFIX_NUMBER=$((10#$number))
+}
+
+# True when the first version is strictly newer than the second. Release fields
+# compare numerically; dev, a, b, rc, final, and post suffixes follow that order.
+# Local labels are ignored after validating their shape. Unknown versions stay
+# silent because guessing their order could emit a downgrade hint.
+_version_gt() {
+  local a="$1" b="$2" a_local="" b_local="" a_release b_release a_suffix b_suffix
+  local ax bx a_rank b_rank a_number b_number local_part
+
+  case "$a" in *+*) a_local=${a#*+}; a=${a%%+*} ;; esac
+  case "$b" in *+*) b_local=${b#*+}; b=${b%%+*} ;; esac
+  for local_part in "$a_local" "$b_local"; do
+    case "$local_part" in *[!A-Za-z0-9._-]*) return 1 ;; esac
+  done
+  [ "$1" = "$a" ] || [ -n "$a_local" ] || return 1
+  [ "$2" = "$b" ] || [ -n "$b_local" ] || return 1
+
+  a_release=${a%%[!0-9.]*}
+  b_release=${b%%[!0-9.]*}
+  case "$a_release" in *.) [ "$a" != "$a_release" ] || return 1; a_release=${a_release%.} ;; esac
+  case "$b_release" in *.) [ "$b" != "$b_release" ] || return 1; b_release=${b_release%.} ;; esac
+  case "$a_release" in ""|.*|*.|*..*|*[!0-9.]*) return 1 ;; esac
+  case "$b_release" in ""|.*|*.|*..*|*[!0-9.]*) return 1 ;; esac
+  a_suffix=${a#$a_release}
+  b_suffix=${b#$b_release}
+
+  _version_suffix_key "$a_suffix" || return 1
+  a_rank=$_VERSION_SUFFIX_RANK
+  a_number=$_VERSION_SUFFIX_NUMBER
+  _version_suffix_key "$b_suffix" || return 1
+  b_rank=$_VERSION_SUFFIX_RANK
+  b_number=$_VERSION_SUFFIX_NUMBER
+
+  while [ -n "$a_release" ] || [ -n "$b_release" ]; do
+    ax=${a_release%%.*}
+    bx=${b_release%%.*}
+    [ "${#ax}" -le 9 ] && [ "${#bx}" -le 9 ] || return 1
+    # 10# forces base ten so a zero-padded field is not read as octal.
+    ax=$((10#${ax:-0}))
+    bx=$((10#${bx:-0}))
+    [ "$ax" -gt "$bx" ] && return 0
+    [ "$ax" -lt "$bx" ] && return 1
+    case "$a_release" in *.*) a_release=${a_release#*.} ;; *) a_release="" ;; esac
+    case "$b_release" in *.*) b_release=${b_release#*.} ;; *) b_release="" ;; esac
+  done
+
+  [ "$a_rank" -gt "$b_rank" ] && return 0
+  [ "$a_rank" -lt "$b_rank" ] && return 1
+  [ "$a_number" -gt "$b_number" ]
+}
+
+# Latest memsearch version on PyPI, cached for 24h and refreshed off the
+# blocking path. Keeps the update hint current without making any session start
+# wait on a network round trip: a cache older than a day is still printed, and
+# the refresh runs in a detached child, so the hint is at most one session
+# stale. Prints nothing until the first lookup has answered.
 _pypi_latest_version() {
-  local cache="$HOME/.memsearch/.pypi-latest" latest json
+  local cache="$HOME/.memsearch/.pypi-latest" last
   # A cache file younger than a day is authoritative even when it is empty: an
   # empty file records a lookup that failed, so an offline machine stops
   # re-paying the curl timeout on every session start.
@@ -169,11 +289,27 @@ _pypi_latest_version() {
     cat "$cache" 2>/dev/null || true
     return 0
   fi
-  json=$(curl -s --max-time 2 https://pypi.org/pypi/memsearch/json 2>/dev/null || true)
-  latest=$(_json_val "$json" "info.version" "")
+  last=$(cat "$cache" 2>/dev/null || true)
   mkdir -p "$(dirname "$cache")" 2>/dev/null || true
-  printf '%s' "$latest" > "$cache" 2>/dev/null || true
-  printf '%s' "$latest"
+  # Only an answer marks the cache fresh: the child's mv is the sole writer of
+  # both the contents and the mtime. That keeps the sentence above true -- an
+  # empty fresh file records a lookup that ran and failed, never one that was
+  # merely started -- and a refresh that dies leaves the previous answer for the
+  # next start to retry. Concurrent starts may each spawn a lookup; off the
+  # blocking path that costs the session start nothing.
+  # Both fds must be redirected. The hook runner keeps a pipe on the hook's
+  # stderr, so `child >/dev/null &` still holds the session start open until the
+  # child exits (measured in #676). Same form as the Lite-mode index subshell.
+  (
+    local json latest tmp="$cache.$$"
+    json=$(curl -s --max-time 2 https://pypi.org/pypi/memsearch/json 2>/dev/null || true)
+    latest=$(_json_val "$json" "info.version" "")
+    if printf '%s' "$latest" > "$tmp" 2>/dev/null; then
+      mv -f "$tmp" "$cache" 2>/dev/null || true
+    fi
+    rm -f "$tmp" 2>/dev/null || true
+  ) </dev/null >/dev/null 2>&1 &
+  printf '%s' "$last"
 }
 
 # Return a concise user-facing warning when the persisted index state says
@@ -208,9 +344,9 @@ PY
 }
 
 skill_candidate_hint() {
-  [ -n "$MEMSEARCH_CMD" ] || return 0
+  memsearch_available || return 0
   [ -d "$MEMSEARCH_DIR/skill-candidates" ] || return 0
-  MEMSEARCH_DIR="$MEMSEARCH_DIR" $MEMSEARCH_CMD skills status --hint 2>/dev/null || true
+  MEMSEARCH_DIR="$MEMSEARCH_DIR" _memsearch skills status --hint 2>/dev/null || true
 }
 
 # Helper: ensure memory directory exists
@@ -223,20 +359,24 @@ COLLECTION_DESC=""
 
 # Helper: run memsearch with arguments, silently fail if not available
 run_memsearch() {
-  if [ -n "$MEMSEARCH_CMD" ] && [ -n "$COLLECTION_NAME" ]; then
-    $MEMSEARCH_CMD "$@" --collection "$COLLECTION_NAME" ${COLLECTION_DESC:+--description "$COLLECTION_DESC"} 2>/dev/null || true
-  elif [ -n "$MEMSEARCH_CMD" ]; then
-    $MEMSEARCH_CMD "$@" ${COLLECTION_DESC:+--description "$COLLECTION_DESC"} 2>/dev/null || true
+  memsearch_available || return 0
+  require_default_collection_support || return $?
+  if [ -n "$COLLECTION_NAME" ]; then
+    _memsearch "$@" --default-collection "$COLLECTION_NAME" ${COLLECTION_DESC:+--description "$COLLECTION_DESC"} 2>/dev/null || true
+  else
+    _memsearch "$@" ${COLLECTION_DESC:+--description "$COLLECTION_DESC"} 2>/dev/null || true
   fi
 }
 
 run_maintenance() {
   if command -v python3 >/dev/null 2>&1; then
-    MEMSEARCH_NO_WATCH=1 python3 "$SCRIPT_DIR/../scripts/maintenance-runner.py" \
-      --platform claude-code \
-      --project-dir "$_PROJECT_DIR" \
-      --memsearch-dir "$MEMSEARCH_DIR" \
-      >/dev/null 2>&1 || true
+    (
+      cd "$_PROJECT_DIR"
+      MEMSEARCH_NO_WATCH=1 python3 "$SCRIPT_DIR/../scripts/maintenance-runner.py" \
+        --platform claude-code \
+        --project-dir "$_PROJECT_DIR" \
+        --memsearch-dir "$MEMSEARCH_DIR"
+    ) >/dev/null 2>&1 || true
   fi
 }
 
@@ -329,7 +469,7 @@ start_watch() {
   if [ "${MEMSEARCH_NO_WATCH:-}" = "1" ]; then
     return 0
   fi
-  if [ -z "$MEMSEARCH_CMD" ]; then
+  if ! memsearch_available; then
     return 0
   fi
   ensure_memory_dir
@@ -338,7 +478,7 @@ start_watch() {
   stop_watch
 
   # Detect Milvus backend from URI
-  local _uri="${MILVUS_URI:-$($MEMSEARCH_CMD config get milvus.uri 2>/dev/null || echo "")}"
+  local _uri="${MILVUS_URI:-$(_memsearch config get milvus.uri 2>/dev/null || echo "")}"
 
   # Lite (local .db): skip watch entirely — file lock prevents concurrent access.
   # Session-start does a one-time index() instead.
@@ -346,14 +486,19 @@ start_watch() {
     return 0
   fi
 
+  require_default_collection_support || return $?
+
   # Server (http/tcp): setsid — watch runs persistently for real-time indexing.
   local launch_prefix="nohup"
   command -v setsid &>/dev/null && launch_prefix="setsid"
 
-  if [ -n "$COLLECTION_NAME" ]; then
-    $launch_prefix $MEMSEARCH_CMD watch "$MEMORY_DIR" --collection "$COLLECTION_NAME" ${COLLECTION_DESC:+--description "$COLLECTION_DESC"} </dev/null &>/dev/null &
-  else
-    $launch_prefix $MEMSEARCH_CMD watch "$MEMORY_DIR" ${COLLECTION_DESC:+--description "$COLLECTION_DESC"} </dev/null &>/dev/null &
-  fi
+  (
+    cd "$_PROJECT_DIR"
+    if [ -n "$COLLECTION_NAME" ]; then
+      exec $launch_prefix "${MEMSEARCH_CMD[@]}" watch "$MEMORY_DIR" --default-collection "$COLLECTION_NAME" ${COLLECTION_DESC:+--description "$COLLECTION_DESC"}
+    else
+      exec $launch_prefix "${MEMSEARCH_CMD[@]}" watch "$MEMORY_DIR" ${COLLECTION_DESC:+--description "$COLLECTION_DESC"}
+    fi
+  ) </dev/null &>/dev/null &
   echo $! > "$WATCH_PIDFILE"
 }

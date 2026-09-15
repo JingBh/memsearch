@@ -164,10 +164,12 @@ memsearch config set plugins.opencode.summarize.provider openai
 ```
 
 Leave `plugins.opencode.summarize.provider` empty or set it to `native` to keep the current `small_model` / plugin default behavior. This setting does not fall back to `llm.model`.
+Native summaries run with isolated XDG config and data directories, and the plugin does not copy the user's OpenCode auth store into them. If that environment cannot authenticate, capture retains only an unavailable note and the transcript anchor.
+Native `opencode run` output must contain bullet lines. The managed-provider command keeps its existing contract and accepts any non-empty plain-text summary.
 
 ## How It Works
 
-1. **Capture**: After each conversation turn, the plugin extracts the user+assistant exchange, summarizes it via LLM, and appends to a daily markdown file.
+1. **Capture**: After each conversation turn, the plugin extracts the user+assistant exchange, sends it to the configured summarizer, and appends the result to a daily markdown file. If summarization fails, times out, exits unsuccessfully, or returns no usable output, the plugin writes a short unavailable note instead of the turn text. The transcript remains accessible through the entry's progressive-disclosure anchor.
 
 2. **Index**: The markdown files are indexed by memsearch into a Milvus collection (Milvus Lite by default, runs in-process).
 
@@ -181,6 +183,6 @@ Leave `plugins.opencode.summarize.provider` empty or set it to `native` to keep 
 |---------|-------------|----------|----------|
 | Session storage | JSONL | SQLite | JSONL |
 | Hook system | Shell scripts | TypeScript hooks | JS API |
-| Summarizer | claude -p --model haiku | opencode prompt | openclaw agent |
+| Summarizer | claude -p --model haiku | opencode run | openclaw agent |
 | Context injection | SessionStart hook | system.transform | before_agent_start |
 | Skill context | context: fork | N/A (no fork) | N/A |

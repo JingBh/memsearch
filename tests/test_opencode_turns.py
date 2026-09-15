@@ -765,6 +765,221 @@ def test_capture_session_turns_keeps_monotonic_turn_index_across_batches(
     conn.close()
 
 
+def _prepare_summary_capture(
+    tmp_path: Path,
+    session_id: str,
+    marker: str,
+    assistant_text: str = "Answer",
+) -> tuple[sqlite3.Connection, sqlite3.Connection, Path, Path, Path]:
+    db_path = tmp_path / "opencode.db"
+    conn = _make_opencode_db(db_path)
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    memory_dir = project_dir / ".memsearch" / "memory"
+
+    _insert_message(conn, "u1", session_id, 100, "user", text=marker)
+    _insert_message(
+        conn,
+        "a1",
+        session_id,
+        110,
+        "assistant",
+        parent_id="u1",
+        finish="stop",
+        text=assistant_text,
+    )
+    _insert_message(conn, "u2", session_id, 200, "user", text="Close the first turn")
+    conn.commit()
+    return conn, open_turn_db(str(project_dir)), db_path, project_dir, memory_dir
+
+
+def _run_summary_capture(
+    conn: sqlite3.Connection,
+    turn_db: sqlite3.Connection,
+    db_path: Path,
+    memory_dir: Path,
+    session_id: str,
+) -> str:
+    capture_daemon.capture_session_turns(
+        conn,
+        turn_db,
+        str(memory_dir),
+        session_id,
+        "",
+        "memsearch",
+        str(db_path),
+    )
+    return next(memory_dir.glob("*.md")).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("mode", ["missing", "failure", "nonzero", "empty", "unusable", "timeout"])
+def test_capture_session_turns_omits_transcript_when_native_summary_fails(
+    tmp_path: Path,
+    monkeypatch,
+    mode: str,
+) -> None:
+    session_id = "ses_summary_failure"
+    marker = "S651_SYNTHETIC_PRIVATE_TURN_MARKER"
+    conn, turn_db, db_path, _, memory_dir = _prepare_summary_capture(tmp_path, session_id, marker)
+    isolated_root = tmp_path / "isolated"
+
+    monkeypatch.setattr(capture_daemon, "get_plugin_summarize_enabled", lambda *args: True)
+    monkeypatch.setattr(capture_daemon, "get_plugin_summarize_provider", lambda *args: "")
+    monkeypatch.setattr(capture_daemon, "get_plugin_summarize_model", lambda *args: "")
+    monkeypatch.setattr(capture_daemon, "_load_summarize_prompt", lambda *args: "Summarize safely.")
+    monkeypatch.setattr(capture_daemon, "ensure_isolated_config", lambda *args: str(isolated_root))
+
+    def fail_native(cmd, **kwargs):
+        if mode == "missing":
+            raise FileNotFoundError("opencode")
+        if mode == "failure":
+            raise RuntimeError("synthetic native failure")
+        if mode == "timeout":
+            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+        if mode == "nonzero":
+            return subprocess.CompletedProcess(cmd, 23, stdout=f"- {marker}\n", stderr="synthetic failure")
+        if mode == "unusable":
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{marker}\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(capture_daemon.subprocess, "run", fail_native)
+
+    content = _run_summary_capture(conn, turn_db, db_path, memory_dir, session_id)
+    assert marker not in content
+    assert "Memory summary unavailable" in content
+    assert "transcript content was omitted" in content
+    assert f"<!-- session:{session_id} turn:u1 db:{db_path} -->" in content
+    assert load_turn_state(turn_db, session_id).last_completed_turn_id == "u1"
+
+    turn_db.close()
+    conn.close()
+
+
+def test_capture_session_turns_omits_transcript_when_prompt_loading_raises(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    session_id = "ses_prompt_exception"
+    marker = "S651_SYNTHETIC_PROMPT_EXCEPTION_MARKER"
+    conn, turn_db, db_path, _, memory_dir = _prepare_summary_capture(
+        tmp_path,
+        session_id,
+        marker,
+        "Synthetic answer",
+    )
+
+    monkeypatch.setattr(capture_daemon, "get_plugin_summarize_enabled", lambda *args: True)
+
+    def raise_prompt_decode_error(*args):
+        raise UnicodeError("synthetic unreadable prompt")
+
+    monkeypatch.setattr(capture_daemon, "_load_summarize_prompt", raise_prompt_decode_error)
+
+    content = _run_summary_capture(conn, turn_db, db_path, memory_dir, session_id)
+    assert marker not in content
+    assert "Synthetic answer" not in content
+    assert capture_daemon._SUMMARY_UNAVAILABLE in content
+    assert f"<!-- session:{session_id} turn:u1 db:{db_path} -->" in content
+    assert load_turn_state(turn_db, session_id).last_completed_turn_id == "u1"
+
+    turn_db.close()
+    conn.close()
+
+
+@pytest.mark.parametrize("mode", ["exception", "nonzero", "empty", "timeout"])
+def test_capture_session_turns_omits_transcript_when_managed_summary_fails(
+    tmp_path: Path,
+    monkeypatch,
+    mode: str,
+) -> None:
+    session_id = "ses_managed_summary_failure"
+    marker = "S651_SYNTHETIC_MANAGED_PRIVATE_MARKER"
+    conn, turn_db, db_path, _, memory_dir = _prepare_summary_capture(tmp_path, session_id, marker)
+
+    monkeypatch.setattr(capture_daemon, "get_plugin_summarize_enabled", lambda *args: True)
+    monkeypatch.setattr(capture_daemon, "_load_summarize_prompt", lambda *args: "Summarize safely.")
+    monkeypatch.setattr(capture_daemon, "get_plugin_summarize_provider", lambda *args: "openai")
+
+    def fail_managed(cmd, **kwargs):
+        if mode == "exception":
+            raise RuntimeError("synthetic managed failure")
+        if mode == "timeout":
+            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+        if mode == "nonzero":
+            return subprocess.CompletedProcess(cmd, 23, stdout=f"- {marker}\n", stderr="synthetic failure")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(capture_daemon.subprocess, "run", fail_managed)
+
+    content = _run_summary_capture(conn, turn_db, db_path, memory_dir, session_id)
+    assert marker not in content
+    assert capture_daemon._SUMMARY_UNAVAILABLE in content
+    assert f"<!-- session:{session_id} turn:u1 db:{db_path} -->" in content
+    assert load_turn_state(turn_db, session_id).last_completed_turn_id == "u1"
+
+    turn_db.close()
+    conn.close()
+
+
+def test_capture_session_turns_accepts_managed_provider_plain_text(tmp_path: Path, monkeypatch) -> None:
+    session_id = "ses_managed_plain_text"
+    marker = "S651_SYNTHETIC_MANAGED_PLAIN_TEXT_MARKER"
+    plain_summary = "Managed provider plain-text summary."
+    conn, turn_db, db_path, _, memory_dir = _prepare_summary_capture(tmp_path, session_id, marker)
+
+    monkeypatch.setattr(capture_daemon, "get_plugin_summarize_enabled", lambda *args: True)
+    monkeypatch.setattr(capture_daemon, "_load_summarize_prompt", lambda *args: "Summarize safely.")
+    monkeypatch.setattr(capture_daemon, "get_plugin_summarize_provider", lambda *args: "openai")
+    monkeypatch.setattr(
+        capture_daemon.subprocess,
+        "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout=f"{plain_summary}\n", stderr=""),
+    )
+
+    content = _run_summary_capture(conn, turn_db, db_path, memory_dir, session_id)
+    assert plain_summary in content
+    assert marker not in content
+    assert "Memory summary unavailable" not in content
+    assert f"<!-- session:{session_id} turn:u1 db:{db_path} -->" in content
+    assert load_turn_state(turn_db, session_id).last_completed_turn_id == "u1"
+
+    turn_db.close()
+    conn.close()
+
+
+def test_capture_session_turns_keeps_normal_native_summary_behavior(tmp_path: Path, monkeypatch) -> None:
+    session_id = "ses_summary_success"
+    marker = "S651_SYNTHETIC_NORMAL_USER_MARKER"
+    conn, turn_db, db_path, _, memory_dir = _prepare_summary_capture(tmp_path, session_id, marker)
+    isolated_root = tmp_path / "isolated"
+
+    monkeypatch.setattr(capture_daemon, "get_plugin_summarize_enabled", lambda *args: True)
+    monkeypatch.setattr(capture_daemon, "get_plugin_summarize_provider", lambda *args: "")
+    monkeypatch.setattr(capture_daemon, "get_plugin_summarize_model", lambda *args: "")
+    monkeypatch.setattr(capture_daemon, "_load_summarize_prompt", lambda *args: "Summarize safely.")
+    monkeypatch.setattr(capture_daemon, "ensure_isolated_config", lambda *args: str(isolated_root))
+
+    captured_env = {}
+
+    def summarize_native(cmd, **kwargs):
+        captured_env.update(kwargs["env"])
+        return subprocess.CompletedProcess(cmd, 0, stdout="- Safe synthetic summary.\n", stderr="")
+
+    monkeypatch.setattr(capture_daemon.subprocess, "run", summarize_native)
+
+    content = _run_summary_capture(conn, turn_db, db_path, memory_dir, session_id)
+    assert "- Safe synthetic summary." in content
+    assert marker not in content
+    assert "Memory summary unavailable" not in content
+    assert f"<!-- session:{session_id} turn:u1 db:{db_path} -->" in content
+    assert captured_env["XDG_DATA_HOME"] == str(isolated_root / "data")
+    assert captured_env["MEMSEARCH_NO_WATCH"] == "1"
+    assert load_turn_state(turn_db, session_id).last_completed_turn_id == "u1"
+
+    turn_db.close()
+    conn.close()
+
+
 def test_capture_session_turns_is_idempotent_after_partial_state_save_failure(
     tmp_path: Path,
     monkeypatch,
@@ -1082,7 +1297,8 @@ def test_capture_session_turns_uses_legacy_last_msg_time_before_sidecar_exists(
     assert f"<!-- session:{session_id} db:{db_path} -->" in content
     assert f"<!-- session:{session_id} turn:u1 db:{db_path} -->" not in content
     assert f"<!-- session:{session_id} turn:u2 db:{db_path} -->" in content
-    assert "Question two" in content
+    assert "Question two" not in content
+    assert "Memory summary unavailable" in content
 
     state = load_turn_state(turn_db, session_id)
     assert state.last_completed_turn_id == "u2"
