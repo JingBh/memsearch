@@ -26,7 +26,7 @@ Docs: https://zilliztech.github.io/memsearch/platforms/zcode/installation/
 ```toml
 [plugins.zcode.summarize]
 enabled = true
-provider = ""      # empty/native = plain user/assistant extract (ZCode has no headless CLI)
+provider = ""      # empty/native = plain user/assistant extract (no native summarizer)
 model = ""
 
 [plugins.zcode.project_review]
@@ -53,7 +53,8 @@ paths = []            # where installed skills are copied; empty = ask the user
 
 ## Native model defaults
 
-- ZCode ships no headless CLI, so there is no native LLM summarizer. With
+- ZCode's bundled CLI only runs inside the desktop app's environment, so there
+  is no native LLM summarizer. With
   `provider = ""` or `native`, capture stores a plain "User asked / ZCode"
   extract of the turn instead of an LLM summary.
 - Maintenance tasks (`project_review`, `user_profile`, `memory_to_skill`)

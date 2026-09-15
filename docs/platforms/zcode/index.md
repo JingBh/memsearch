@@ -29,7 +29,7 @@ If you use ZCode alongside Claude Code or Codex on the same repository, memsearc
 - **Real transcripts from SQLite** -- the worker reads the finished turn from `~/.zcode/cli/db/db.sqlite`, not from the one-line transcript ZCode hands to hooks
 - **Three-layer progressive recall** -- search, expand, and drill into original conversations ([details](memory-recall.md))
 - **Cold-start context** -- recent memories injected at session start via `additionalContext`
-- **Provider-routed summarization** -- ZCode ships no headless CLI, so summaries run through a memsearch-managed LLM provider
+- **Provider-routed summarization** -- ZCode's bundled CLI only runs inside the desktop app's environment, so summaries run through a memsearch-managed LLM provider
 - **ONNX embedding by default** -- no API key required, runs locally on CPU
 
 ---

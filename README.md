@@ -210,7 +210,7 @@ We discussed the authentication flow before, what was the approach?
 <details>
 <summary><h3>For ZCode Users</h3></summary>
 
-In **Settings → Plugin Management → Discover**, add the `zilliztech/memsearch` repository as a marketplace and install **memsearch-zcode**. Then route summaries through a memsearch-managed provider (ZCode has no headless CLI):
+In **Settings → Plugin Management → Discover**, add the `zilliztech/memsearch` repository as a marketplace and install **memsearch-zcode**. Then route summaries through a memsearch-managed provider (ZCode has no standalone CLI the plugin can call):
 
 ```bash
 memsearch config set llm.providers.openai.type openai

@@ -30,7 +30,7 @@ ZCode runs hooks inline and hands them a one-line transcript, so the Stop hook o
 
 ## Summarization
 
-ZCode ships no headless CLI, so there is no native summarizer. Route summaries through a memsearch-managed provider:
+ZCode's bundled CLI only runs inside the desktop app's environment, so the plugin has no native summarizer. Route summaries through a memsearch-managed provider:
 
 ```toml
 [llm.providers.openai]

@@ -133,7 +133,7 @@ def plain_extract(turn: ZCodeTurn | None, payload: dict[str, Any]) -> str:
 
 
 def summarize(transcript: str, snapshot: dict[str, Any], command: list[str], cwd: Path, env: dict[str, str]) -> str:
-    """Summarize through a memsearch-managed provider; ZCode has no headless CLI for a native path."""
+    """Summarize through a memsearch-managed provider; ZCode offers no standalone CLI for a native path."""
     provider = str(config_value(snapshot, "plugins.zcode.summarize.provider"))
     if not provider or provider == "native":
         return ""

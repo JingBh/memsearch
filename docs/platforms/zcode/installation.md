@@ -20,7 +20,7 @@ ZCode copies the plugin into `~/.zcode/cli/plugins/cache/<marketplace>/memsearch
 
 ## Configure summarization
 
-ZCode has no headless CLI, so there is no native summarizer. Define a memsearch-managed provider and route the ZCode plugin through it:
+ZCode's bundled CLI only runs inside the desktop app's environment, so the plugin has no native summarizer. Define a memsearch-managed provider and route the ZCode plugin through it:
 
 ```bash
 memsearch config set llm.providers.openai.type openai
