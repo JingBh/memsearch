@@ -131,6 +131,15 @@ export default function (pi: ExtensionAPI) {
     }
 
     const collectionName = collection.stdout.trim()
+    if (memsearchCommand) {
+      const support = await pi.exec(memsearchCommand.command, [...memsearchCommand.prefix, 'config', 'get', 'milvus.collection', '--default-collection', collectionName], {
+        cwd: projectDir,
+        timeout: 5000
+      })
+      if (support.code !== 0) {
+        throw new Error('installed memsearch CLI is incompatible with this extension; --default-collection support is required')
+      }
+    }
     const memsearchDir = explicitMemsearchDir
       ? resolve(expandHome(explicitMemsearchDir))
       : join(homedir(), '.memsearch', 'projects', collectionName)
@@ -163,14 +172,14 @@ export default function (pi: ExtensionAPI) {
     if (backendUri.startsWith('http') || backendUri.startsWith('tcp')) {
       state.watcher = runDetached(
         memsearchCommand,
-        ['watch', memoryDir, '--collection', collectionName],
+        ['watch', memoryDir, '--default-collection', collectionName],
         projectDir,
         { ...process.env, MEMSEARCH_DIR: memsearchDir }
       )
     } else {
       runDetached(
         memsearchCommand,
-        ['index', memoryDir, '--collection', collectionName],
+        ['index', memoryDir, '--default-collection', collectionName],
         projectDir,
         { ...process.env, MEMSEARCH_DIR: memsearchDir }
       )
@@ -271,7 +280,7 @@ export default function (pi: ExtensionAPI) {
         '--top-k',
         String(params.topK ?? 5),
         '--json-output',
-        '--collection',
+        '--default-collection',
         state.collectionName
       ], signal, 30000)
       return { content: [{ type: 'text', text }], details: {} }
@@ -290,7 +299,7 @@ export default function (pi: ExtensionAPI) {
       const text = await runMemsearch([
         'expand',
         params.chunkHash,
-        '--collection',
+        '--default-collection',
         state.collectionName
       ], signal, 15000)
       return { content: [{ type: 'text', text }], details: {} }

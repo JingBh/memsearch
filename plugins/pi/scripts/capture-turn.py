@@ -193,7 +193,7 @@ def process(payload_path: Path) -> None:
                     *command,
                     'index',
                     str(memory_dir),
-                    '--collection',
+                    '--default-collection',
                     str(payload['collectionName']),
                 ],
                 cwd=Path(payload['projectDir']),
