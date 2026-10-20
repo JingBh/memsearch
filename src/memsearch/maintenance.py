@@ -359,7 +359,7 @@ def _run_openai_with_tools(
         kwargs["base_url"] = base_url
     if provider_cfg.api_key:
         kwargs["api_key"] = resolve_env_ref(provider_cfg.api_key)
-    client = openai.OpenAI(**kwargs)
+    client = openai.OpenAI(max_retries=10, **kwargs)
     messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
     tools = [_openai_memory_tool_schema()]
     chosen_model = model or "gpt-5-mini"
@@ -710,6 +710,12 @@ def _record_failure_state(
 
 @contextlib.contextmanager
 def _file_lock(path: Path):
+    # Reclaim a lock whose owner died without removing it, e.g. a runner killed when the app quit.
+    with contextlib.suppress(OSError, ValueError):
+        try:
+            os.kill(int(path.read_text(encoding="utf-8")), 0)
+        except ProcessLookupError:
+            path.unlink()
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:

@@ -109,7 +109,8 @@ async def _compact_openai(prompt: str, model: str, *, base_url: str | None = Non
     if api_key:
         kwargs["api_key"] = resolve_env_ref(api_key)
 
-    client = openai.AsyncOpenAI(**kwargs)
+    # Ride out a gateway's brief rate limits and connection errors, and cut a hung request well inside the Stop hook's budget.
+    client = openai.AsyncOpenAI(max_retries=10, timeout=50, **kwargs)
     resp = await client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],

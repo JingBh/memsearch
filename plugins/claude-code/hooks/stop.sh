@@ -145,7 +145,7 @@ if [ -n "$SUMMARIZE_PROVIDER" ] && [ "$SUMMARIZE_PROVIDER" != "native" ] && mems
   SUMMARY=$(printf '%s' "$PARSED" | MEMSEARCH_NO_WATCH=1 _run_summarizer "${MEMSEARCH_CMD[@]}" summarize \
     --plugin claude-code \
     --agent-name "$AGENT_NAME" \
-    2>/dev/null)
+    2>>"$MEMSEARCH_DIR/.summarize-errors.log")
   SUMMARY_STATUS=$?
   set -e
 elif command -v claude &>/dev/null; then

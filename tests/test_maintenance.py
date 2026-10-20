@@ -648,3 +648,21 @@ def test_run_memory_command_preserves_error_fallback_and_local_command_encoding(
     assert run_memory_command(f"find {memory} -name '*.md'", ctx) == "local output"
     assert "encoding" not in calls[-1][1]
     assert "errors" not in calls[-1][1]
+
+
+def test_file_lock_reclaims_lock_of_dead_owner(tmp_path: Path) -> None:
+    owner = subprocess.Popen([sys.executable, "-c", "pass"])
+    owner.wait()
+    lock = tmp_path / ".maintenance.lock"
+    lock.write_text(str(owner.pid), encoding="utf-8")
+    with maintenance._file_lock(lock) as acquired:
+        assert acquired
+    assert not lock.exists()
+
+
+def test_file_lock_respects_lock_of_live_owner(tmp_path: Path) -> None:
+    lock = tmp_path / ".maintenance.lock"
+    lock.write_text(str(os.getppid()), encoding="utf-8")
+    with maintenance._file_lock(lock) as acquired:
+        assert not acquired
+    assert lock.exists()
