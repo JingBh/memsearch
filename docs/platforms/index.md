@@ -1,25 +1,28 @@
 # Platform Overview
 
+<<<<<<< HEAD
 memsearch provides plugins for 6 AI coding agent platforms. All plugins share the same core architecture: capture conversations to markdown, index with Milvus, recall via semantic search.
+=======
+The table compares the agent plugins maintained in the MemSearch repository. They capture conversations to Markdown, index them with Milvus, and recall them through semantic search.
+>>>>>>> upstream/main
 
 ---
 
 ## Comparison Table
 
-| Feature | [Claude Code](claude-code/index.md) | [Codex](codex/index.md) | [DeepSeek Harness](dsh/index.md) | [OpenClaw](openclaw/index.md) | [OpenCode](opencode/index.md) | [ZCode](zcode/index.md) |
-|---------|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Plugin type** | Shell hooks | Shell hooks | Native ESM + web client | TS registerTool | TS npm plugin | Shell hooks |
-| **Capture method** | Stop hook (async) | Stop hook (async) | `session/event` turn end | agent_end hook | SQLite daemon | Stop hook + detached SQLite reader |
-| **Summarization** | `claude -p --model haiku` | `codex exec` | DSH headless agent | OpenClaw agent | `opencode run` | memsearch-managed provider |
-| **Recall mechanism** | SKILL.md (context: fork) | SKILL.md | Native skill | memory_search tool | memory_search tool | SKILL.md |
-| **L3 transcript format** | Claude Code JSONL | Codex rollout JSONL | DSH session database | OpenClaw JSONL | OpenCode SQLite | ZCode SQLite |
-| **Isolation** | Per-project collection | Per-project collection | Per-project collection | Per-workspace collection | Per-project collection | Per-project collection |
-| **Install method** | Plugin marketplace | `install.sh` | `dsh plugin add` | `openclaw plugins install --force` + hook permissions | npm + opencode.json | Plugin marketplace |
-| **Embedding default** | ONNX bge-m3 (CPU) | ONNX bge-m3 (CPU) | ONNX bge-m3 (CPU) | ONNX bge-m3 (CPU) | ONNX bge-m3 (CPU) | ONNX bge-m3 (CPU) |
-| **API key required** | No (ONNX default) | No (ONNX default) | No (ONNX default) | No (ONNX default) | No (ONNX default) | No (ONNX default) |
+| Feature | [Claude Code](claude-code/index.md) | [Codex](codex/index.md) | [DeepSeek Harness](dsh/index.md) | [OpenClaw](openclaw/index.md) | [OpenCode](opencode/index.md) | [ZCode](zcode/index.md) | [WorkBuddy](workbuddy.md) |
+|---------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Plugin type** | Shell hooks | Shell hooks | Native ESM + web client | TS registerTool | TS npm plugin | Shell hooks | Shell hooks |
+| **Capture method** | Stop hook (async) | Stop hook (async) | `session/event` turn end | agent_end hook | Execution events + SQLite recovery | Stop hook + detached SQLite reader | Stop hook |
+| **Summarization** | `claude -p --model haiku` | `codex exec` | DSH headless agent | OpenClaw agent | Native `ctx.generate.text` | memsearch-managed provider | Named API provider |
+| **Recall mechanism** | SKILL.md (context: fork) | SKILL.md | Native skill | memory_search tool | memory_search tool | SKILL.md | SKILL.md |
+| **L3 transcript format** | Claude Code JSONL | Codex rollout JSONL | DSH session database | OpenClaw JSONL | OpenCode SQLite | ZCode SQLite | WorkBuddy JSONL |
+| **Isolation** | Per-project collection | Per-project collection | Per-project collection | Per-workspace collection | Per-project collection | Per-project collection | Per-project collection |
+| **Install method** | Plugin marketplace | `install.sh` | `dsh plugin add` | `openclaw plugins install --force` + hook permissions | `opencode plugin add` | Plugin marketplace | Desktop marketplace |
+| **Embedding default** | ONNX bge-m3 (CPU) | ONNX bge-m3 (CPU) | ONNX bge-m3 (CPU) | ONNX bge-m3 (CPU) | ONNX bge-m3 (CPU) | ONNX bge-m3 (CPU) | ONNX bge-m3 (CPU) |
+| **API key required** | No (ONNX default) | No (ONNX default) | No (ONNX default) | No (ONNX default) | No (ONNX default) | No (ONNX default) | Yes, for summaries |
 
-Each plugin keeps its current native summarizer when the plugin-specific
-provider setting is empty. Claude Code, Codex, OpenClaw, and OpenCode also
+WorkBuddy requires a named API provider for capture. The other plugins keep their native summarizer when the plugin-specific provider setting is empty. Claude Code, Codex, OpenClaw, and OpenCode also
 accept `native`; DSH selects its headless-agent backend when the provider is
 unset. To override one plugin's native model, set
 `plugins.<platform>.summarize.model`, for example
@@ -109,6 +112,7 @@ All plugins write standard markdown and derive collection names from the project
 | OpenClaw agent development | [OpenClaw plugin](openclaw/index.md) -- native TS integration, multi-agent isolation |
 | OpenCode user | [OpenCode plugin](opencode/index.md) -- npm package, SQLite-native capture |
 | ZCode user | [ZCode plugin](zcode/index.md) -- marketplace install, hook-triggered SQLite capture |
+| WorkBuddy user | [WorkBuddy setup](workbuddy.md) |
 | Using multiple platforms | Install plugins on each -- they share the same memory backend |
 
 ---

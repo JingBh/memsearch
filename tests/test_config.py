@@ -10,6 +10,7 @@ import tomli_w
 from memsearch.config import (
     EmbeddingConfig,
     MemSearchConfig,
+    PluginPlatformConfig,
     PluginsConfig,
     _dict_to_config,
     deep_merge,
@@ -508,7 +509,9 @@ def test_save_config_expands_user_in_string_path(tmp_path: Path, monkeypatch: py
     """save_config should expand '~' when given a string path."""
     fake_home = tmp_path / "home"
     fake_home.mkdir()
+    # Windows expands '~' using USERPROFILE.
     monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
 
     path = "~/.memsearch/test-config.toml"
     data = {"embedding": {"provider": "google"}}
@@ -525,6 +528,7 @@ def test_load_config_file_expands_user_in_string_path(tmp_path: Path, monkeypatc
     config_dir = fake_home / ".memsearch"
     config_dir.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("USERPROFILE", str(fake_home))
 
     data = {"milvus": {"collection": "from-home"}}
     config_path = config_dir / "test-config.toml"
@@ -649,6 +653,13 @@ def test_plugins_config_defaults():
     assert cfg.opencode.summarize.model == ""
     assert cfg.openclaw.summarize.model == ""
     assert cfg.zcode.summarize.model == ""
+
+
+def test_plugins_config_keeps_existing_positional_arguments():
+    cc, codex, opencode, openclaw, dsh = (PluginPlatformConfig() for _ in range(5))
+    cfg = PluginsConfig(cc, codex, opencode, openclaw, dsh)
+    assert cfg.openclaw is openclaw and cfg.dsh is dsh
+    assert cfg.workbuddy is not openclaw
 
 
 def test_compact_config_new_fields():

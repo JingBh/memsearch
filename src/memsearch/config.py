@@ -211,6 +211,7 @@ class PluginsConfig:
     openclaw: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
     dsh: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
     zcode: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
+    workbuddy: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
 
 
 @dataclass
@@ -247,6 +248,7 @@ _PLUGIN_KEY_TO_FIELD = {
     "codex": "codex",
     "pi": "pi",
     "opencode": "opencode",
+    "workbuddy": "workbuddy",
     "openclaw": "openclaw",
     "dsh": "dsh",
     "zcode": "zcode",
@@ -256,6 +258,7 @@ _PLUGIN_FIELD_TO_KEY = {
     "codex": "codex",
     "pi": "pi",
     "opencode": "opencode",
+    "workbuddy": "workbuddy",
     "openclaw": "openclaw",
     "dsh": "dsh",
     "zcode": "zcode",

@@ -167,9 +167,7 @@ $ memsearch config set plugins.codex.project_review.output_file .memsearch/PROJE
 Set plugins.codex.project_review.output_file = .memsearch/PROJECT.md in /home/user/.memsearch/config.toml
 ```
 
-Supported plugin platforms are `claude-code`, `codex`, `opencode`, and
-`openclaw`. Supported plugin tasks are `summarize`, `project_review`,
-`user_profile`, and `memory_to_skill`.
+Platform keys are `claude-code`, `codex`, `dsh`, `opencode`, `openclaw`, and `workbuddy`. All support `summarize`. The first five also support the background tasks `project_review`, `user_profile`, and `memory_to_skill`.
 
 #### `memsearch config get`
 
@@ -304,6 +302,7 @@ provider = "openai"
 | `llm.providers.<name>.model` | string | `""` | Default model for a named plugin summarization provider |
 | `llm.providers.<name>.base_url` | string | `""` | OpenAI-compatible API base URL for a named provider |
 | `llm.providers.<name>.api_key` | string | `""` | API key for a named provider (supports `env:VAR_NAME` syntax) |
+| `plugins.workbuddy.summarize.provider` | string | `""` | Named API provider for WorkBuddy capture. Empty or `native` skips capture. |
 | `plugins.claude-code.summarize.provider` | string | `""` | Claude Code summarize provider route (empty/`native` = native summarizer) |
 | `plugins.claude-code.summarize.model` | string | `""` | Claude Code native model override, or named provider model override |
 | `plugins.codex.summarize.provider` | string | `""` | Codex summarize provider route (empty/`native` = native summarizer) |
@@ -405,6 +404,19 @@ Indexed 42 chunks.
 ## `memsearch search`
 
 Run a semantic search query against indexed chunks. Uses [hybrid search](https://milvus.io/docs/multi-vector-search.md) (dense vector cosine similarity + [BM25](https://en.wikipedia.org/wiki/Okapi_BM25) full-text) with [RRF](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf) reranking for best results.
+
+Optional second-stage reranking can use a local cross-encoder or the remote Jev
+provider after RRF fusion. To enable Jev in trusted global configuration:
+
+```bash
+export TYPESAFE_API_KEY="your-key"
+memsearch config set reranker.model jev:jev-latest
+memsearch search "how to configure Redis caching"
+```
+
+This sends the query and candidate contents to TypeSafe and requires no local
+reranker weights. It is disabled by default. See [reranker configuration](home/configuration.md#optional-remote-reranking)
+and the [bilingual evaluation](https://github.com/zilliztech/memsearch/blob/main/evaluation/reranking-evaluation.md).
 
 ### Options
 
@@ -784,7 +796,7 @@ Total indexed chunks: 87
 
 ### Notes
 
-- **Stats may lag on remote Milvus Server.** The `get_collection_stats()` API on a remote Milvus Server may return stale counts immediately after an upsert. Stats are updated after segment flush and compaction. Search results are always up to date.
+- **Stats may lag on remote Milvus Server.** The `get_collection_stats()` API on a remote Milvus Server may return stale counts immediately after an upsert. Stats are updated after segment flush and compaction. A zero metadata count does not prevent search from checking growing-only collections. Once metadata reports sealed rows, search keeps Milvus's existing hybrid-search consistency, so newly growing rows in a mixed collection may still have a brief visibility delay.
 
 ---
 
