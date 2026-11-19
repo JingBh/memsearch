@@ -844,7 +844,7 @@ def compact(
 
 
 @cli.command()
-@click.option("--plugin", required=True, help="Plugin platform name (claude-code, codex, pi, opencode, openclaw, zcode, workbuddy).")
+@click.option("--plugin", required=True, help="Plugin platform name (claude-code, codex, pi, opencode, openclaw, zcode, workbuddy, antigravity).")
 @click.option("--agent-name", default="", help="Agent display name for the summarize prompt.")
 def summarize(plugin: str, agent_name: str) -> None:
     """Summarize stdin using a configured memsearch-managed LLM provider."""
@@ -1169,6 +1169,7 @@ def config_init(project: bool) -> None:
         "opencode": {"summarize": {}, "project_review": {}, "user_profile": {}},
         "openclaw": {"summarize": {}, "project_review": {}, "user_profile": {}},
         "zcode": {"summarize": {}, "project_review": {}, "user_profile": {}},
+        "antigravity": {"summarize": {}, "project_review": {}, "user_profile": {}},
     }
     result["plugins"]["claude-code"]["summarize"]["enabled"] = click.confirm(
         "  Claude Code automatic summaries enabled",
@@ -1242,6 +1243,18 @@ def config_init(project: bool) -> None:
         "  ZCode summarize model",
         default=current.plugins.zcode.summarize.model,
     )
+    result["plugins"]["antigravity"]["summarize"]["enabled"] = click.confirm(
+        "  Antigravity automatic summaries enabled",
+        default=current.plugins.antigravity.summarize.enabled,
+    )
+    result["plugins"]["antigravity"]["summarize"]["provider"] = click.prompt(
+        "  Antigravity summarize provider",
+        default=current.plugins.antigravity.summarize.provider,
+    )
+    result["plugins"]["antigravity"]["summarize"]["model"] = click.prompt(
+        "  Antigravity summarize model",
+        default=current.plugins.antigravity.summarize.model,
+    )
 
     click.echo("\n── Advanced maintenance ──")
     click.echo("  Disabled by default. Configure provider/model if you enable these tasks.")
@@ -1252,6 +1265,7 @@ def config_init(project: bool) -> None:
         ("opencode", "OpenCode", current.plugins.opencode),
         ("openclaw", "OpenClaw", current.plugins.openclaw),
         ("zcode", "ZCode", current.plugins.zcode),
+        ("antigravity", "Antigravity", current.plugins.antigravity),
     ]:
         for task_name, task_label in [("project_review", "project review"), ("user_profile", "user profile")]:
             task = getattr(current_platform, task_name)
@@ -1380,7 +1394,7 @@ def skills_group() -> None:
 
 
 @skills_group.command("distill")
-@click.option("--plugin", required=True, help="Plugin platform name (claude-code, codex, pi, opencode, openclaw, zcode).")
+@click.option("--plugin", required=True, help="Plugin platform name (claude-code, codex, pi, opencode, openclaw, zcode, antigravity).")
 @click.option("--force", is_flag=True, help="Run even if input is unchanged or not yet due.")
 def skills_distill(plugin: str, force: bool) -> None:
     """Mine recent memory journals for recurring workflows using a configured API provider.

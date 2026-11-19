@@ -1,0 +1,9 @@
+{
+  "name": "memsearch",
+  "displayName": "MemSearch",
+  "version": "0.1.0",
+  "description": "Automatic persistent semantic memory across sessions via MemSearch.",
+  "author": {
+    "name": "Zilliz"
+  }
+}

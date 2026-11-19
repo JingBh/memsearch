@@ -206,12 +206,13 @@ class PluginsConfig:
 
     claude_code: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
     codex: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
-    pi: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
     opencode: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
     openclaw: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
     dsh: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
+    pi: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
     zcode: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
     workbuddy: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
+    antigravity: PluginPlatformConfig = field(default_factory=PluginPlatformConfig)
 
 
 @dataclass
@@ -252,6 +253,7 @@ _PLUGIN_KEY_TO_FIELD = {
     "openclaw": "openclaw",
     "dsh": "dsh",
     "zcode": "zcode",
+    "antigravity": "antigravity",
 }
 _PLUGIN_FIELD_TO_KEY = {
     "claude_code": "claude-code",
@@ -262,6 +264,7 @@ _PLUGIN_FIELD_TO_KEY = {
     "openclaw": "openclaw",
     "dsh": "dsh",
     "zcode": "zcode",
+    "antigravity": "antigravity",
 }
 
 

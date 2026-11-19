@@ -44,6 +44,8 @@ def test_default_config():
     assert cfg.plugins.pi.project_review.enabled is False
     assert cfg.plugins.zcode.summarize.model == ""
     assert cfg.plugins.zcode.project_review.enabled is False
+    assert cfg.plugins.antigravity.summarize.model == ""
+    assert cfg.plugins.antigravity.project_review.enabled is False
     assert cfg.plugins.codex.project_review.enabled is False
     assert cfg.plugins.codex.project_review.min_interval_hours == 24
     assert cfg.plugins.codex.project_review.input_dir == ".memsearch/memory"
